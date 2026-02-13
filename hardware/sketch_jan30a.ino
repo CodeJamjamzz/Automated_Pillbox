@@ -98,30 +98,67 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 class WifiCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
+      // 1. Get raw value from BLE
       String value = pCharacteristic->getValue();
+
       if (value.length() > 0) {
         String data = value;
-        int commaIndex = data.indexOf(',');
-        if (commaIndex > 0) {
-          String ssid = data.substring(0, commaIndex);
-          String pass = data.substring(commaIndex + 1);
 
+        // --- DEBUGGING: Print EXACTLY what is received ---
+        Serial.println("\n========== [BLE DATA RECEIVED] ==========");
+        Serial.print("Raw String: \"");
+        Serial.print(data);
+        Serial.println("\"");
+
+        // Print HEX values to check for hidden characters
+        // Period (.) is 2E. Comma (,) is 2C.
+        Serial.print("Hex Dump:   ");
+        for(int i=0; i<data.length(); i++) {
+            Serial.printf("%02X ", (uint8_t)data[i]);
+        }
+        Serial.println();
+        // --------------------------------------------------
+
+        // 2. Parse Logic
+        // We look for the FIRST comma.
+        // NOTE: If your SSID contains a comma (e.g., "My,Wifi"), this will fail.
+        int commaIndex = data.indexOf(',');
+
+        if (commaIndex > 0) {
+          // Split the string
+          String ssid = data.substring(0, commaIndex);
+          String pass = data.substring(commaIndex + 1); // +1 skips the comma itself
+
+          // 3. Clean up
+          // trim() removes Spaces (0x20), Newlines (0x0A/0x0D), Tabs (0x09)
+          // It DOES NOT remove periods (0x2E) or other punctuation.
           ssid.trim();
           pass.trim();
 
-          // Update Global Variables
-          savedSSID = ssid;
-          savedPass = pass;
+          Serial.println("--- [PARSED CREDENTIALS] ---");
+          Serial.print("SSID: \""); Serial.print(ssid); Serial.println("\"");
+          Serial.print("PASS: \""); Serial.print(pass); Serial.println("\"");
 
-          // Save to Storage
-          preferences.begin("wifi_conf", false);
-          preferences.putString("ssid", ssid);
-          preferences.putString("pass", pass);
-          preferences.end();
+          // 4. Save & Trigger Connect
+          if (ssid != savedSSID || pass != savedPass) {
+             Serial.println(">>> New credentials detected. Saving...");
+             savedSSID = ssid;
+             savedPass = pass;
 
-          // 3. TRIGGER CONNECTION INSTEAD OF REBOOT
-          shouldConnect = true;
+             preferences.begin("wifi_conf", false);
+             preferences.putString("ssid", ssid);
+             preferences.putString("pass", pass);
+             preferences.end();
+
+             shouldConnect = true;
+          } else {
+             Serial.println(">>> Credentials identical to saved. Ignoring.");
+          }
         }
+        else {
+           Serial.println("ERROR: Separator ',' not found. Format must be 'SSID,PASS'");
+        }
+        Serial.println("=========================================\n");
       }
     }
 };
@@ -224,8 +261,9 @@ void loop() {
      lcd.print("New WiFi...");
 
      // Disconnect previous and start new
-     WiFi.disconnect();
-     delay(100);
+     WiFi.disconnect(true);
+     delay(500);
+     WiFi.mode(WIFI_STA);    // Ensure Station mode
      WiFi.begin(savedSSID.c_str(), savedPass.c_str());
 
      lastWifiRetry = millis(); // Reset retry timer so background logic waits
