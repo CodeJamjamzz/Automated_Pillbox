@@ -1,24 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Platform, PermissionsAndroid, Alert } from 'react-native';
 import { Bluetooth, RefreshCw, Cpu, ChevronRight, MapPin } from 'lucide-react-native';
-import { BleManager, Device } from 'react-native-ble-plx';
+import {bleManager} from '@/app/utils/BleService'
+import {useNavigation} from "@react-navigation/native"
+import {Device} from "react-native-ble-plx";
 
 // --- IMPORTS ---
 import LocationRequestModal from './LocationRequestModal';
-import WifiSetupModal from './WifiSetupModal'; // <--- NEW IMPORT
+import WifiSetupModal from './WifiSetupModal';
 
 interface BluetoothScreenProps {
-  onConnect: (device: Device) => void; // UPDATED: Passes full device object now
+  onConnect: (device: Device) => void;
 }
-
-// Initialize BLE Manager once
-const manager = new BleManager();
 
 const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
   // Scanning State
   const [isScanning, setIsScanning] = useState(true);
   const [devices, setDevices] = useState<Device[]>([]);
   const foundDeviceIds = useRef<Set<string>>(new Set());
+  const navigation = useNavigation<any>();
 
   // Modal State
   const [isLocateModalVisible, setLocateModalVisible] = useState(false);
@@ -31,7 +31,7 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
   useEffect(() => {
     requestPermissionsAndScan();
     return () => {
-      manager.stopDeviceScan();
+      bleManager.stopDeviceScan();
     };
   }, []);
 
@@ -66,17 +66,13 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
     setDevices([]);
     foundDeviceIds.current.clear();
 
-    manager.startDeviceScan(null, null, (error, device) => {
+    bleManager.startDeviceScan(null, null, (error, device) => {
       if (error) {
-        // console.log("Scan error:", error); // Ignore trivial scan errors
         return;
       }
 
       // Filter: Only show unique devices with names
       if (device && device.name && !foundDeviceIds.current.has(device.id)) {
-        // Optional: Only show "MedBox Device" to clean up list
-        // if (device.name === 'MedBox Device') { ... }
-
         foundDeviceIds.current.add(device.id);
         setDevices(prev => [...prev, device]);
       }
@@ -84,7 +80,7 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
 
     // Stop scanning after 10s to save battery
     setTimeout(() => {
-      manager.stopDeviceScan();
+      bleManager.stopDeviceScan();
       setIsScanning(false);
     }, 10000);
   };
@@ -94,7 +90,7 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
     if (isConnecting) return;
 
     setIsConnecting(true);
-    manager.stopDeviceScan();
+    bleManager.stopDeviceScan();
 
     try {
       // A. Connect
@@ -105,6 +101,7 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
       setSelectedDevice(connectedDevice);
 
       // C. Open Wi-Fi Modal
+      // NOTE: We do NOT navigate here anymore. We wait for the modal to finish.
       setWifiModalVisible(true);
 
     } catch (error) {
@@ -116,7 +113,7 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
   };
 
   const handleRefresh = () => {
-    manager.stopDeviceScan();
+    bleManager.stopDeviceScan();
     startScanning();
   };
 
@@ -206,8 +203,16 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
             onClose={() => setWifiModalVisible(false)}
             onSuccess={() => {
               setWifiModalVisible(false);
+
               if (selectedDevice) {
-                onConnect(selectedDevice); // <--- Only connect AFTER Wi-Fi is sent
+                // 1. Notify parent prop
+                onConnect(selectedDevice);
+
+                // 2. Navigate to Dashboard ONLY after successful Wi-Fi setup
+                // This ensures the device object is still "alive" during the modal interaction
+                navigation.navigate('Dashboard', {
+                  connectedDevice: selectedDevice
+                });
               }
             }}
         />

@@ -1,18 +1,21 @@
 import React, {useState, useEffect, useMemo, useRef} from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Dimensions, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Dimensions, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { Battery, Bluetooth, MapPin, Volume2, Clock, Maximize2, X, Check, Calendar, PlusCircle, Smartphone, Box, MapPinOff, RefreshCw, Lock } from 'lucide-react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
-import * as Location from 'expo-location';
+// import MapView, { Marker, Polyline } from 'react-native-maps';
+// import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
-import { Audio } from 'expo-av'; // NEW: Import Audio
+import { Audio } from 'expo-av';
 
 // --- IMPORTS ---
 import { PatientRecord, Partition } from '../../types';
 import PartitionConfig from './PartitionConfig';
 import AlarmModal from './AlarmModal';
 import { registerForNotifications } from '@/app/utils/NotificationService';
-import { BleManager, Device } from 'react-native-ble-plx';
 import WifiSetupModal from '../WifiSetupModal';
+
+import {bleManager} from '@/app/utils/BleService'
+import {Device} from "react-native-ble-plx";
+import {useRoute, useNavigation} from "@react-navigation/native";
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 12;
@@ -44,34 +47,64 @@ export const INITIAL_PATIENT_DATA: PatientRecord = {
   }))
 };
 
-const FALLBACK_REGION = {
-  latitude: 10.3292,
-  longitude: 123.9063,
-  latitudeDelta: 0.005,
-  longitudeDelta: 0.005,
-};
+// const FALLBACK_REGION = {
+//   latitude: 10.3292,
+//   longitude: 123.9063,
+//   latitudeDelta: 0.005,
+//   longitudeDelta: 0.005,
+// };
 
 interface PatientDashboardProps {
   patient?: PatientRecord;
   onUpdate?: (patient: PatientRecord) => void;
+  connectedDevice: Device | null;
 }
-
-const manager = new BleManager();
 
 const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   const [patient, setPatient] = useState<PatientRecord>(INITIAL_PATIENT_DATA);
   const [configPartition, setConfigPartition] = useState<Partition | null>(null);
-  const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
   const [isWifiModalVisible, setWifiModalVisible] = useState(false);
+
+  const route = useRoute();
+  const navigation = useNavigation();
   const isRebooting = useRef(false);
+
+  // 1. Get the "Hollow" device from params (contains ID, but no methods)
+  const {connectedDevice} = (route.params as {connectedDevice?: Device}) || {};
+
+  // 2. State to hold the "Live" device (contains methods like .writeCharacteristic)
+  const [device, setDevice] = useState<Device | null>(connectedDevice || null);
+
+  // --- REHYDRATE DEVICE OBJECT ---
+  // This restores the BLE functions lost during navigation
+  useEffect(() => {
+    const fetchLiveDevice = async () => {
+      if (connectedDevice?.id) {
+        try {
+          // Get all connected devices from the OS
+          const connectedDevices = await bleManager.connectedDevices([]);
+          // Find the one that matches our ID
+          const liveDevice = connectedDevices.find(d => d.id === connectedDevice.id);
+
+          if (liveDevice) {
+            console.log("Device rehydrated successfully");
+            setDevice(liveDevice);
+          } else {
+            console.log("Device not found in connected list. It may have disconnected.");
+            // Optional: You could trigger a re-connect scan here if needed
+          }
+        } catch (error) {
+          console.warn("Failed to rehydrate device:", error);
+        }
+      }
+    };
+
+    fetchLiveDevice();
+  }, [connectedDevice]);
 
   const handleWifiSuccess = () => {
     console.log("Wi-Fi credentials sent. Expecting reboot...");
-
-    // 1. Set the flag so onDisconnected knows it's intentional
     isRebooting.current = true;
-
-    // 2. Close the modal
     setWifiModalVisible(false);
   };
 
@@ -80,10 +113,10 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // --- MAP / TRACKING STATE ---
-  const [showFullMap, setShowFullMap] = useState(false);
-  const [permissionStatus, setPermissionStatus] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
-  const [userLocation, setUserLocation] = useState<any>(null);
-  const [kitLocation, setKitLocation] = useState<any>(null);
+  // const [showFullMap, setShowFullMap] = useState(false);
+  // const [permissionStatus, setPermissionStatus] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
+  // const [userLocation, setUserLocation] = useState<any>(null);
+  // const [kitLocation, setKitLocation] = useState<any>(null);
 
   const isNewDevice = patient.partitions.every(p => !p.label || p.label === 'Unassigned');
 
@@ -124,7 +157,6 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
     // 2. Update Inventory (Pill Count)
     const updatedPartitions = patient.partitions.map(p => {
       if (p.id === dose.partitionId) {
-        // If taking -> decrease count. If undoing -> increase count.
         const newCount = isTaking
             ? Math.max(0, p.pillCount - 1)
             : p.pillCount + 1;
@@ -149,7 +181,6 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
 
     const playSound = async () => {
       try {
-        // --- FIXED PATH AND EXTENSION HERE ---
         const { sound } = await Audio.Sound.createAsync(
             require('@/assets/audio/alarm.wav')
         );
@@ -162,16 +193,12 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
     };
 
     if (activeAlarmPartition) {
-      // 1. Start Timeout
       timeoutId = setTimeout(() => {
         setActiveAlarmPartition(null);
       }, 60000);
-
-      // 2. Play Sound
       playSound();
     }
 
-    // Cleanup: Stop sound & Clear timeout
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
       if (soundObject) {
@@ -186,18 +213,13 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   const handleAlarmConfirm = () => {
     if (!activeAlarmPartition) return;
 
-    // A. Find pending dose
     const doseToMark = todayDoses.find(d =>
         d.partitionId === activeAlarmPartition.id && d.status === 'pending'
     );
 
-    // B. Mark visually
     if (doseToMark) {
-      // We use the helper logic directly here to update inventory too
       handleDoseAction(doseToMark);
     } else {
-      // Fallback if dose not found in list but alarm triggered (rare edge case)
-      // Just update inventory manually
       const updatedPartitions = patient.partitions.map(p => {
         if (p.id === activeAlarmPartition.id) {
           return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
@@ -207,45 +229,45 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
       handlePatientUpdate({ ...patient, partitions: updatedPartitions });
     }
 
-    setActiveAlarmPartition(null); // Sound stops automatically due to useEffect cleanup
+    setActiveAlarmPartition(null);
   };
 
 
   // --- LOCATION & NOTIFICATION ---
-  const requestLocationPermission = async () => {
-    setPermissionStatus('undetermined');
-    try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-
-      if (status !== 'granted') {
-        setPermissionStatus('denied');
-        setUserLocation(null);
-        return;
-      }
-
-      setPermissionStatus('granted');
-      let location = await Location.getCurrentPositionAsync({});
-
-      const userLoc = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        latitudeDelta: 0.005,
-        longitudeDelta: 0.005,
-      };
-      setUserLocation(userLoc);
-      setKitLocation({
-        latitude: location.coords.latitude + 0.0003,
-        longitude: location.coords.longitude + 0.0003,
-      });
-
-    } catch (error) {
-      console.log("Error requesting location:", error);
-      setPermissionStatus('denied');
-    }
-  };
+  // const requestLocationPermission = async () => {
+  //   setPermissionStatus('undetermined');
+  //   try {
+  //     let { status } = await Location.requestForegroundPermissionsAsync();
+  //
+  //     if (status !== 'granted') {
+  //       setPermissionStatus('denied');
+  //       setUserLocation(null);
+  //       return;
+  //     }
+  //
+  //     setPermissionStatus('granted');
+  //     let location = await Location.getCurrentPositionAsync({});
+  //
+  //     const userLoc = {
+  //       latitude: location.coords.latitude,
+  //       longitude: location.coords.longitude,
+  //       latitudeDelta: 0.005,
+  //       longitudeDelta: 0.005,
+  //     };
+  //     setUserLocation(userLoc);
+  //     setKitLocation({
+  //       latitude: location.coords.latitude + 0.0003,
+  //       longitude: location.coords.longitude + 0.0003,
+  //     });
+  //
+  //   } catch (error) {
+  //     console.log("Error requesting location:", error);
+  //     setPermissionStatus('denied');
+  //   }
+  // };
 
   useEffect(() => {
-    requestLocationPermission();
+    // requestLocationPermission();
     registerForNotifications();
 
     const subscription = Notifications.addNotificationResponseReceivedListener(response => {
@@ -286,16 +308,6 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
     return displayDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   };
 
-  const triggerAppPrompt = (slotId) => {
-    // Logic to open your "AlarmModal" immediately
-    // and set the auto-confirm timer.
-    const partition = patient.partitions.find(p => p.id === parseInt(slotId));
-    if(partition) {
-      setActiveAlarmPartition(partition);
-      // The AlarmModal already has logic to auto-confirm!
-    }
-  }
-
   return (
       <View style={{ flex: 1 }}>
         <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
@@ -307,11 +319,18 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
               </View>
               <Text style={styles.subtitle}>Connected PillBox Device</Text>
             </View>
-            {/* Update the Header Status Badge to be clickable */}
             <View style={styles.statusContainer}>
               <TouchableOpacity
                   style={styles.badgeBlue}
-                  onPress={() => setWifiModalVisible(true)} // <--- Opens the modal
+                  onPress={() => {
+                    // Check if we have a live device before opening modal
+                    // We check for .connect method existence to verify it's not a hollow object
+                    if (device && typeof device.connect === 'function') {
+                      setWifiModalVisible(true);
+                    } else {
+                      Alert.alert("Not Connected", "Device is not actively connected or functionality is limited. Please reconnect.");
+                    }
+                  }}
               >
                 <Bluetooth size={14} stroke="#0d9488" />
                 <Text style={styles.badgeTextBlue}>LINK / WI-FI</Text>
@@ -394,7 +413,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                   </View>
                   <Text style={styles.emptyStateTitle}>No Alarms Set</Text>
                   <Text style={styles.emptyStateText}>
-                    Tap any "Empty" slot above to set up your first medication reminder.
+                    Tap any Empty slot above to set up your first medication reminder.
                   </Text>
                 </View>
             ) : (
@@ -418,26 +437,26 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                               </Text>
                             </View>
 
-                            <TouchableOpacity
-                                onPress={() => handleDoseAction(dose)} // NEW: Use handleDoseAction
-                                disabled={isButtonDisabled}
-                                style={[
-                                  styles.actionBtn,
-                                  dose.status === 'taken' ? styles.actionBtnTaken : styles.actionBtnPending,
-                                  isButtonDisabled ? styles.actionBtnDisabled : {}
-                                ]}
-                            >
-                              {isButtonDisabled ? (
-                                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>
-                                    <Lock size={10} stroke="#94a3b8" />
-                                    <Text style={styles.actionTextDisabled}>Wait</Text>
-                                  </View>
-                              ) : (
-                                  <Text style={[styles.actionBtnText, dose.status === 'taken' ? styles.actionTextTaken : styles.actionTextPending]}>
-                                    {dose.status === 'taken' ? 'Undo' : 'Take'}
-                                  </Text>
-                              )}
-                            </TouchableOpacity>
+                            {/*<TouchableOpacity*/}
+                            {/*    onPress={() => handleDoseAction(dose)}*/}
+                            {/*    disabled={isButtonDisabled}*/}
+                            {/*    style={[*/}
+                            {/*      styles.actionBtn,*/}
+                            {/*      dose.status === 'taken' ? styles.actionBtnTaken : styles.actionBtnPending,*/}
+                            {/*      isButtonDisabled ? styles.actionBtnDisabled : {}*/}
+                            {/*    ]}*/}
+                            {/*>*/}
+                            {/*  {isButtonDisabled ? (*/}
+                            {/*      <View style={{flexDirection: 'row', alignItems: 'center', gap: 4}}>*/}
+                            {/*        <Lock size={10} stroke="#94a3b8" />*/}
+                            {/*        <Text style={styles.actionTextDisabled}>Wait</Text>*/}
+                            {/*      </View>*/}
+                            {/*  ) : (*/}
+                            {/*      <Text style={[styles.actionBtnText, dose.status === 'taken' ? styles.actionTextTaken : styles.actionTextPending]}>*/}
+                            {/*        {dose.status === 'taken' ? 'Undo' : 'Take'}*/}
+                            {/*      </Text>*/}
+                            {/*  )}*/}
+                            {/*</TouchableOpacity>*/}
                           </View>
                         </View>
                     );
@@ -447,130 +466,130 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
           </View>
 
           {/* --- LIVE TRACKER --- */}
-          <View style={styles.trackerSection}>
-            <View style={styles.trackerHeader}>
-              <View style={styles.trackerTitleContainer}>
-                <View style={styles.iconBg}>
-                  <MapPin size={20} stroke="#f43f5e" />
-                </View>
-                <Text style={styles.trackerTitle}>Live Tracker</Text>
-              </View>
-              {permissionStatus === 'granted' && (
-                  <TouchableOpacity onPress={() => setShowFullMap(true)} style={styles.focusButton}>
-                    <Maximize2 size={12} stroke="#2563eb" />
-                    <Text style={styles.focusButtonText}>FULL MAP</Text>
-                  </TouchableOpacity>
-              )}
-            </View>
+          {/*<View style={styles.trackerSection}>*/}
+          {/*  <View style={styles.trackerHeader}>*/}
+          {/*    <View style={styles.trackerTitleContainer}>*/}
+          {/*      <View style={styles.iconBg}>*/}
+          {/*        <MapPin size={20} stroke="#f43f5e" />*/}
+          {/*      </View>*/}
+          {/*      <Text style={styles.trackerTitle}>Live Tracker</Text>*/}
+          {/*    </View>*/}
+          {/*    {permissionStatus === 'granted' && (*/}
+          {/*        <TouchableOpacity onPress={() => setShowFullMap(true)} style={styles.focusButton}>*/}
+          {/*          <Maximize2 size={12} stroke="#2563eb" />*/}
+          {/*          <Text style={styles.focusButtonText}>FULL MAP</Text>*/}
+          {/*        </TouchableOpacity>*/}
+          {/*    )}*/}
+          {/*  </View>*/}
 
-            <TouchableOpacity
-                onPress={() => permissionStatus === 'granted' && setShowFullMap(true)}
-                activeOpacity={permissionStatus === 'granted' ? 0.7 : 1}
-                style={styles.mapContainer}
-            >
-              {permissionStatus === 'denied' ? (
-                  <View style={styles.errorContainer}>
-                    <View style={styles.errorIconBg}>
-                      <MapPinOff size={24} stroke="#ef4444" />
-                    </View>
-                    <Text style={styles.errorTitle}>Location Required</Text>
-                    <Text style={styles.errorText}>Please enable location services</Text>
+          {/*  <TouchableOpacity*/}
+          {/*      onPress={() => permissionStatus === 'granted' && setShowFullMap(true)}*/}
+          {/*      activeOpacity={permissionStatus === 'granted' ? 0.7 : 1}*/}
+          {/*      style={styles.mapContainer}*/}
+          {/*  >*/}
+          {/*    {permissionStatus === 'denied' ? (*/}
+          {/*        <View style={styles.errorContainer}>*/}
+          {/*          <View style={styles.errorIconBg}>*/}
+          {/*            <MapPinOff size={24} stroke="#ef4444" />*/}
+          {/*          </View>*/}
+          {/*          <Text style={styles.errorTitle}>Location Required</Text>*/}
+          {/*          <Text style={styles.errorText}>Please enable location services</Text>*/}
 
-                    <TouchableOpacity onPress={requestLocationPermission} style={styles.retryButton}>
-                      <RefreshCw size={14} stroke="#fff" />
-                      <Text style={styles.retryButtonText}>RETRY CONNECTION</Text>
-                    </TouchableOpacity>
-                  </View>
+          {/*          <TouchableOpacity onPress={requestLocationPermission} style={styles.retryButton}>*/}
+          {/*            <RefreshCw size={14} stroke="#fff" />*/}
+          {/*            <Text style={styles.retryButtonText}>RETRY CONNECTION</Text>*/}
+          {/*          </TouchableOpacity>*/}
+          {/*        </View>*/}
 
-              ) : permissionStatus === 'granted' && userLocation ? (
-                  <>
-                    <MapView
-                        style={styles.map}
-                        initialRegion={userLocation}
-                        showsUserLocation={true}
-                        pointerEvents="none"
-                    >
-                      {kitLocation && (
-                          <Marker
-                              coordinate={kitLocation}
-                              title="My MedBox"
-                              description="Last seen 2 mins ago"
-                              pinColor="red"
-                          />
-                      )}
-                    </MapView>
+          {/*    ) : permissionStatus === 'granted' && userLocation ? (*/}
+          {/*        <>*/}
+          {/*          <MapView*/}
+          {/*              style={styles.map}*/}
+          {/*              initialRegion={userLocation}*/}
+          {/*              showsUserLocation={true}*/}
+          {/*              pointerEvents="none"*/}
+          {/*          >*/}
+          {/*            {kitLocation && (*/}
+          {/*                <Marker*/}
+          {/*                    coordinate={kitLocation}*/}
+          {/*                    title="My MedBox"*/}
+          {/*                    description="Last seen 2 mins ago"*/}
+          {/*                    pinColor="red"*/}
+          {/*                />*/}
+          {/*            )}*/}
+          {/*          </MapView>*/}
 
-                    <View style={styles.mapStatus}>
-                      <View style={styles.statusRow}>
-                        <View style={styles.blueDot} />
-                        <Text style={styles.statusText}>Phone</Text>
-                      </View>
-                      <View style={styles.divider} />
-                      <View style={styles.statusRow}>
-                        <View style={styles.redDot} />
-                        <Text style={styles.statusText}>Kit (45m away)</Text>
-                      </View>
-                    </View>
-                  </>
+          {/*          <View style={styles.mapStatus}>*/}
+          {/*            <View style={styles.statusRow}>*/}
+          {/*              <View style={styles.blueDot} />*/}
+          {/*              <Text style={styles.statusText}>Phone</Text>*/}
+          {/*            </View>*/}
+          {/*            <View style={styles.divider} />*/}
+          {/*            <View style={styles.statusRow}>*/}
+          {/*              <View style={styles.redDot} />*/}
+          {/*              <Text style={styles.statusText}>Kit (45m away)</Text>*/}
+          {/*            </View>*/}
+          {/*          </View>*/}
+          {/*        </>*/}
 
-              ) : (
-                  <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="small" color="#2563eb" />
-                    <Text style={styles.loadingText}>Locating Devices...</Text>
-                  </View>
-              )}
-            </TouchableOpacity>
+          {/*    ) : (*/}
+          {/*        <View style={styles.loadingContainer}>*/}
+          {/*          <ActivityIndicator size="small" color="#2563eb" />*/}
+          {/*          <Text style={styles.loadingText}>Locating Devices...</Text>*/}
+          {/*        </View>*/}
+          {/*    )}*/}
+          {/*  </TouchableOpacity>*/}
 
-            <TouchableOpacity style={styles.locateButton}>
-              <Volume2 size={18} stroke="#475569" />
-              <Text style={styles.locateButtonText}>PING PHYSICAL BOX</Text>
-            </TouchableOpacity>
-          </View>
+          {/*  <TouchableOpacity style={styles.locateButton}>*/}
+          {/*    <Volume2 size={18} stroke="#475569" />*/}
+          {/*    <Text style={styles.locateButtonText}>PING PHYSICAL BOX</Text>*/}
+          {/*  </TouchableOpacity>*/}
+          {/*</View>*/}
 
           {/* --- FULL SCREEN MAP MODAL --- */}
-          <Modal visible={showFullMap} animationType="slide">
-            <View style={styles.fullMapContainer}>
-              {userLocation ? (
-                  <MapView
-                      style={styles.fullMap}
-                      initialRegion={userLocation}
-                      showsUserLocation={true}
-                      showsBuildings
-                      showsTraffic
-                  >
-                    {kitLocation && (
-                        <>
-                          <Marker coordinate={kitLocation} title="My MedBox" description="Device Location" pinColor="red" />
-                          <Polyline
-                              coordinates={[userLocation, kitLocation]}
-                              strokeColor="#2563eb"
-                              strokeWidth={2}
-                              lineDashPattern={[5, 5]}
-                          />
-                        </>
-                    )}
-                  </MapView>
-              ) : (
-                  <MapView style={styles.fullMap} initialRegion={FALLBACK_REGION} />
-              )}
+          {/*<Modal visible={showFullMap} animationType="slide">*/}
+          {/*  <View style={styles.fullMapContainer}>*/}
+          {/*    {userLocation ? (*/}
+          {/*        <MapView*/}
+          {/*            style={styles.fullMap}*/}
+          {/*            initialRegion={userLocation}*/}
+          {/*            showsUserLocation={true}*/}
+          {/*            showsBuildings*/}
+          {/*            showsTraffic*/}
+          {/*        >*/}
+          {/*          {kitLocation && (*/}
+          {/*              <>*/}
+          {/*                <Marker coordinate={kitLocation} title="My MedBox" description="Device Location" pinColor="red" />*/}
+          {/*                <Polyline*/}
+          {/*                    coordinates={[userLocation, kitLocation]}*/}
+          {/*                    strokeColor="#2563eb"*/}
+          {/*                    strokeWidth={2}*/}
+          {/*                    lineDashPattern={[5, 5]}*/}
+          {/*                />*/}
+          {/*              </>*/}
+          {/*          )}*/}
+          {/*        </MapView>*/}
+          {/*    ) : (*/}
+          {/*        <MapView style={styles.fullMap} initialRegion={FALLBACK_REGION} />*/}
+          {/*    )}*/}
 
-              <View style={styles.legendContainer}>
-                <View style={styles.legendItem}>
-                  <Smartphone size={16} stroke="#2563eb" />
-                  <Text style={styles.legendText}>You</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <Box size={16} stroke="#ef4444" />
-                  <Text style={styles.legendText}>MedBox</Text>
-                </View>
-              </View>
+          {/*    <View style={styles.legendContainer}>*/}
+          {/*      <View style={styles.legendItem}>*/}
+          {/*        <Smartphone size={16} stroke="#2563eb" />*/}
+          {/*        <Text style={styles.legendText}>You</Text>*/}
+          {/*      </View>*/}
+          {/*      <View style={styles.legendItem}>*/}
+          {/*        <Box size={16} stroke="#ef4444" />*/}
+          {/*        <Text style={styles.legendText}>MedBox</Text>*/}
+          {/*      </View>*/}
+          {/*    </View>*/}
 
-              <TouchableOpacity onPress={() => setShowFullMap(false)} style={styles.closeMapButton}>
-                <X size={24} stroke="#fff" />
-                <Text style={styles.closeMapText}>CLOSE MAP</Text>
-              </TouchableOpacity>
-            </View>
-          </Modal>
+          {/*    <TouchableOpacity onPress={() => setShowFullMap(false)} style={styles.closeMapButton}>*/}
+          {/*      <X size={24} stroke="#fff" />*/}
+          {/*      <Text style={styles.closeMapText}>CLOSE MAP</Text>*/}
+          {/*    </TouchableOpacity>*/}
+          {/*  </View>*/}
+          {/*</Modal>*/}
 
           {/* --- CONFIG MODAL --- */}
           {configPartition && (
@@ -593,8 +612,8 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
         <WifiSetupModal
             visible={isWifiModalVisible}
             onClose={() => setWifiModalVisible(false)}
-            device={connectedDevice}
-            onSuccess={handleWifiSuccess} // <--- This links the fix!
+            device={device}
+            onSuccess={handleWifiSuccess}
         />
 
         {/* --- ALARM MODAL --- */}
