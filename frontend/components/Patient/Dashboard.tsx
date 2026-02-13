@@ -95,23 +95,19 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
 
   // --- Handle Dose Action (Take/Undo) & Update Inventory ---
   const handleDoseAction = (dose: any) => {
-    const isTaking = !takenDoses.has(dose.id);
+    if (takenDoses.has(dose.id)) return;
     
     // 1. Update Visual Status
     setTakenDoses(prev => {
       const next = new Set(prev);
-      if (isTaking) next.add(dose.id);
-      else next.delete(dose.id);
+      next.add(dose.id);
       return next;
     });
 
     // 2. Update Inventory (Pill Count)
     const updatedPartitions = patient.partitions.map(p => {
       if (p.id === dose.partitionId) {
-        const newCount = isTaking 
-          ? Math.max(0, p.pillCount - 1) 
-          : p.pillCount + 1;
-        return { ...p, pillCount: newCount };
+        return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
       }
       return p;
     });
@@ -268,10 +264,6 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
             <View style={styles.badgeBlue}>
               <Bluetooth size={14} stroke="#0d9488" />
               <Text style={styles.badgeTextBlue}>LINK</Text>
-            </View>
-            <View style={styles.badgeGray}>
-              <Battery size={14} stroke="#475569" />
-              <Text style={styles.badgeTextGray}>100%</Text>
             </View>
           </View>
         </View>

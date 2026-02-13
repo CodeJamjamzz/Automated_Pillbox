@@ -81,7 +81,7 @@ const DailySchedule: React.FC<DailyScheduleProps> = ({ todayDoses, currentTime, 
                       </View>
                     ) : (
                       <Text style={[styles.actionBtnText, dose.status === 'taken' ? styles.actionTextTaken : styles.actionTextPending]}>
-                        {dose.status === 'taken' ? 'Undo' : 'Take'}
+                        {dose.status === 'taken' ? 'Done' : 'Take'}
                       </Text>
                     )}
                   </TouchableOpacity>
