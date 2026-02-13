@@ -95,6 +95,9 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
     try {
       // A. Connect
       const connectedDevice = await device.connect();
+      if (Platform.OS === 'android') {
+        await connectedDevice.requestMTU(512);
+      }
       // B. Discover Services (Crucial for reading Sensors/Writing Wi-Fi)
       await connectedDevice.discoverAllServicesAndCharacteristics();
 

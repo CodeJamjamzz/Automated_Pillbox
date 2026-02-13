@@ -82,16 +82,24 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
       if (connectedDevice?.id) {
         try {
           // Get all connected devices from the OS
-          const connectedDevices = await bleManager.connectedDevices([]);
+          const connectedDevices = await bleManager.connectedDevices([SERVICE_UUID]);
           // Find the one that matches our ID
           const liveDevice = connectedDevices.find(d => d.id === connectedDevice.id);
 
           if (liveDevice) {
-            console.log("Device rehydrated successfully");
+            await liveDevice.discoverAllServicesAndCharacteristics();
             setDevice(liveDevice);
+            console.log("Device rehydrated successfully");
           } else {
-            console.log("Device not found in connected list. It may have disconnected.");
-            // Optional: You could trigger a re-connect scan here if needed
+            // CRITICAL: If not in connected list, try to reconnect by ID
+            console.log("Device lost. Attempting silent reconnect...");
+            try {
+              const freshDevice = await bleManager.connectToDevice(connectedDevice.id);
+              await freshDevice.discoverAllServicesAndCharacteristics();
+              setDevice(freshDevice);
+            } catch (reconnectError) {
+              Alert.alert("Disconnected", "Connection to MedBox lost. Please tap 'Link/Wi-Fi' to reconnect.");
+            }
           }
         } catch (error) {
           console.warn("Failed to rehydrate device:", error);
