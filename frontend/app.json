@@ -32,7 +32,13 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "@config-plugins/react-native-ble-plx",
+      [
+        "@config-plugins/react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": ["peripheral", "central"]
+        }
+      ],
       "expo-router",
       [
         "expo-splash-screen",

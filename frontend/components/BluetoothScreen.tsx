@@ -5,7 +5,7 @@ import { BleManager, Device } from 'react-native-ble-plx';
 
 // --- IMPORTS ---
 import LocationRequestModal from './LocationRequestModal';
-import WifiSetupModal from './WifiModal'; // <--- NEW IMPORT
+import WifiSetupModal from './WifiSetupModal'; // <--- NEW IMPORT
 
 interface BluetoothScreenProps {
   onConnect: (device: Device) => void; // UPDATED: Passes full device object now
@@ -107,9 +107,6 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
       // C. Open Wi-Fi Modal
       setWifiModalVisible(true);
 
-      // D. Notify Parent (Dashboard)
-      onConnect(connectedDevice);
-
     } catch (error) {
       Alert.alert("Connection Failed", "Could not pair with device. Ensure it is powered on.");
       console.log(error);
@@ -205,8 +202,14 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
         {/* 2. Wi-Fi Setup (BLE) */}
         <WifiSetupModal
             visible={isWifiModalVisible}
-            onClose={() => setWifiModalVisible(false)}
             device={selectedDevice}
+            onClose={() => setWifiModalVisible(false)}
+            onSuccess={() => {
+              setWifiModalVisible(false);
+              if (selectedDevice) {
+                onConnect(selectedDevice); // <--- Only connect AFTER Wi-Fi is sent
+              }
+            }}
         />
 
       </View>
