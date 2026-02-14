@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="e33cc190-39d0-4538-b994-c7ac347174c4" name="Changes" comment="treid" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="TypeScript File" />
+        <option value="TypeScript JSX File" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="mvp" />
+      </map>
+    </option>
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GithubDefaultAccount">
+    <option name="defaultAccountId" value="98f7dee8-72f4-4ab1-84d0-330fc207a4b0" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 7
+}</component>
+  <component name="ProjectId" id="39ZKAcYLYAh0ComyJ1IUaIT4wE7" />
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "ignore.virus.scanning.warn.message": "true",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "C:/Projects/Automated_Pillbox1",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "ts.external.directory.path": "C:\\Program Files\\JetBrains\\IntelliJ IDEA 2024.3\\plugins\\javascript-plugin\\jsLanguageServicesImpl\\external",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Projects" />
+      <recent name="C:\Projects\Pillbox" />
+      <recent name="C:\" />
+      <recent name="C:\Users\austi\IdeaProjects\Automated_Pillbox1\hardware" />
+    </key>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="e33cc190-39d0-4538-b994-c7ac347174c4" name="Changes" comment="" />
+      <created>1770898010930</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1770898010930</updated>
+      <workItem from="1770898012207" duration="6804000" />
+      <workItem from="1770904892442" duration="884000" />
+      <workItem from="1770913941660" duration="1256000" />
+      <workItem from="1770930353528" duration="1571000" />
+      <workItem from="1770946786318" duration="374000" />
+      <workItem from="1770985730688" duration="1450000" />
+      <workItem from="1770987489591" duration="1465000" />
+      <workItem from="1770995295757" duration="32752000" />
+    </task>
+    <task id="LOCAL-00001" summary="device connection">
+      <option name="closed" value="true" />
+      <created>1770996326152</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1770996326152</updated>
+    </task>
+    <task id="LOCAL-00002" summary="di ma priso">
+      <option name="closed" value="true" />
+      <created>1771009421085</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1771009421085</updated>
+    </task>
+    <task id="LOCAL-00003" summary="no more map">
+      <option name="closed" value="true" />
+      <created>1771016713069</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1771016713069</updated>
+    </task>
+    <task id="LOCAL-00004" summary="wifi connection">
+      <option name="closed" value="true" />
+      <created>1771019322351</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1771019322351</updated>
+    </task>
+    <task id="LOCAL-00005" summary="wifi connection fixed">
+      <option name="closed" value="true" />
+      <created>1771020011273</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1771020011273</updated>
+    </task>
+    <task id="LOCAL-00006" summary="treid">
+      <option name="closed" value="true" />
+      <created>1771034086723</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1771034086723</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="device connection" />
+    <MESSAGE value="di ma priso" />
+    <MESSAGE value="no more map" />
+    <MESSAGE value="wifi connection" />
+    <MESSAGE value="wifi connection fixed" />
+    <MESSAGE value="treid" />
+    <option name="LAST_COMMIT_MESSAGE" value="treid" />
+  </component>
+</project>
