@@ -16,10 +16,14 @@ import WifiSetupModal from '../WifiSetupModal';
 import {bleManager} from '@/app/utils/BleService'
 import {Device} from "react-native-ble-plx";
 import {useRoute, useNavigation} from "@react-navigation/native";
+import base64 from "react-native-base64";
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 12;
 const ITEM_WIDTH = (width - 76) / 2;
+const SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+const CHAR_SENSOR_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+
 
 // --- INITIAL STATE ---
 export const INITIAL_PATIENT_DATA: PatientRecord = {
@@ -77,37 +81,58 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
 
   // --- REHYDRATE DEVICE OBJECT ---
   // This restores the BLE functions lost during navigation
+  // --- ROBUST RECONNECTION LOGIC ---
   useEffect(() => {
-    const fetchLiveDevice = async () => {
-      if (connectedDevice?.id) {
-        try {
-          // Get all connected devices from the OS
-          const connectedDevices = await bleManager.connectedDevices([SERVICE_UUID]);
-          // Find the one that matches our ID
-          const liveDevice = connectedDevices.find(d => d.id === connectedDevice.id);
+    const initDevice = async () => {
+      // 1. Get the ID from the navigation params (The only thing we trust)
+      const targetId = connectedDevice?.id;
+      if (!targetId) {
+        console.log("⚠️ No device ID passed to Dashboard");
+        return;
+      }
 
-          if (liveDevice) {
-            await liveDevice.discoverAllServicesAndCharacteristics();
-            setDevice(liveDevice);
-            console.log("Device rehydrated successfully");
-          } else {
-            // CRITICAL: If not in connected list, try to reconnect by ID
-            console.log("Device lost. Attempting silent reconnect...");
-            try {
-              const freshDevice = await bleManager.connectToDevice(connectedDevice.id);
-              await freshDevice.discoverAllServicesAndCharacteristics();
-              setDevice(freshDevice);
-            } catch (reconnectError) {
-              Alert.alert("Disconnected", "Connection to MedBox lost. Please tap 'Link/Wi-Fi' to reconnect.");
-            }
+      console.log(`🔄 Attempting to rehydrate connection to: ${targetId}`);
+
+      try {
+        // 2. check if the OS thinks we are connected
+        const isConnected = await bleManager.isDeviceConnected(targetId);
+        console.log(`STATUS: Device is ${isConnected ? 'Connected' : 'Disconnected'} according to OS`);
+
+        let liveDevice: Device | undefined;
+
+        if (isConnected) {
+          // A. It's connected! We need to get the "Live Object" handle.
+          // We ask the manager for the list of connected devices matching our Service UUID.
+          const list = await bleManager.connectedDevices([SERVICE_UUID]);
+          liveDevice = list.find(d => d.id === targetId);
+
+          // Edge Case: If list is empty (happens on Android sometimes), try connecting anyway.
+          if (!liveDevice) {
+            console.log("⚠️ Device connected but not found in list. Forcing new handle...");
+            liveDevice = await bleManager.connectToDevice(targetId);
           }
-        } catch (error) {
-          console.warn("Failed to rehydrate device:", error);
+        } else {
+          // B. Not connected? Connect fresh.
+          console.log("🔌 Connecting to device...");
+          liveDevice = await bleManager.connectToDevice(targetId);
         }
+
+        // 3. CRITICAL: Refresh Services
+        // This ensures the object has all methods (write/read) ready to use.
+        if (liveDevice) {
+          await liveDevice.discoverAllServicesAndCharacteristics();
+          setDevice(liveDevice); // Save the fully functioning object
+          console.log("✅ Device successfully rehydrated and ready!");
+        }
+
+      } catch (error: any) {
+        console.log("❌ Connection Recovery Failed:", error);
+        // Optional: Alert user if reconnection completely fails
+        // Alert.alert("Connection Lost", "Could not reconnect to MedBox.");
       }
     };
 
-    fetchLiveDevice();
+    initDevice();
   }, [connectedDevice]);
 
   const handleWifiSuccess = () => {
@@ -315,6 +340,91 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
     displayDate.setMinutes(m);
     return displayDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   };
+  // Add this helper at the top or inside Dashboard component
+  const getMinutesFromMidnight = (date: Date) => {
+    return date.getHours() * 60 + date.getMinutes();
+  };
+
+  const handleSensorTrigger = (sensorId: number) => {
+    const now = new Date();
+    const currentMinutes = getMinutesFromMidnight(now);
+
+    console.log(`[SENSOR] Triggered ID: ${sensorId} at ${now.toLocaleTimeString()}`);
+
+    // Find a matching dose
+    const matchingDose = todayDoses.find(dose => {
+      // 1. Check Partition ID
+      if (dose.partitionId !== sensorId) return false;
+
+      // 2. Check Status
+      if (dose.status === 'taken') return false;
+
+      // 3. TIME CHECK (Robust Version)
+      // We compare "Minutes from Midnight" to ignore the specific Date (Year/Month)
+      const doseDate = new Date(dose.time);
+      const doseMinutes = getMinutesFromMidnight(doseDate);
+
+      // Handle midnight wrap-around (e.g. 11:58 PM vs 12:05 AM)
+      let diff = Math.abs(currentMinutes - doseMinutes);
+      if (diff > 720) { // If difference is > 12 hours, assume midnight wrap
+        diff = 1440 - diff;
+      }
+
+      console.log(`Checking Dose: ${dose.medName} | Time: ${doseDate.toLocaleTimeString()} | Diff: ${diff} mins`);
+
+      // Check if within 10 minutes
+      return diff <= 10;
+    });
+
+    if (matchingDose) {
+      Alert.alert(
+          "Pill Detected",
+          `Did you just take your ${matchingDose.medName}?`,
+          [
+            { text: "No", style: "cancel" },
+            {
+              text: "Yes, Update Log",
+              onPress: () => handleDoseAction(matchingDose)
+            }
+          ]
+      );
+    } else {
+      console.log(`[SENSOR] No matching alarm found for Slot ${sensorId} within 10 mins.`);
+    }
+  };
+
+
+  // --- 4. BLE SENSOR LISTENER (The Missing Piece) ---
+  useEffect(() => {
+    if (!device) return;
+
+    // Start monitoring the Sensor Characteristic
+    const subscription = device.monitorCharacteristicForService(
+        SERVICE_UUID,
+        CHAR_SENSOR_UUID,
+        (error, characteristic) => {
+          if (error) {
+            console.log("Sensor monitor error:", error);
+            return;
+          }
+
+          // 1. Decode the message (ESP32 sends "1", "2", "3", or "4")
+          // characteristic.value is Base64 encoded.
+          const rawValue = characteristic?.value ? base64.decode(characteristic.value) : "";
+          const sensorId = parseInt(rawValue);
+
+          console.log(`Received Sensor Trigger: ${sensorId}`);
+
+          if (!isNaN(sensorId)) {
+            handleSensorTrigger(sensorId);
+          }
+        }
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [device, todayDoses]); // Re-run if device or schedule changes
 
   return (
       <View style={{ flex: 1 }}>
@@ -329,19 +439,30 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
             </View>
             <View style={styles.statusContainer}>
               <TouchableOpacity
-                  style={styles.badgeBlue}
-                  onPress={() => {
-                    // Check if we have a live device before opening modal
-                    // We check for .connect method existence to verify it's not a hollow object
-                    if (device && typeof device.connect === 'function') {
+                  style={device ? styles.badgeBlue : styles.badgeGray} // Visual feedback
+                  onPress={async () => {
+                    // 1. If connected, open Wi-Fi settings
+                    if (device && await device.isConnected()) {
                       setWifiModalVisible(true);
-                    } else {
-                      Alert.alert("Not Connected", "Device is not actively connected or functionality is limited. Please reconnect.");
+                    }
+                    // 2. If disconnected, try to reconnect manually
+                    else if (connectedDevice?.id) {
+                      Alert.alert("Reconnecting...", "Attempting to restore connection.");
+                      try {
+                        const reconnected = await bleManager.connectToDevice(connectedDevice.id);
+                        await reconnected.discoverAllServicesAndCharacteristics();
+                        setDevice(reconnected);
+                        Alert.alert("Success", "Device reconnected!");
+                      } catch (e) {
+                        Alert.alert("Error", "Could not reconnect. Please restart the MedBox.");
+                      }
                     }
                   }}
               >
-                <Bluetooth size={14} stroke="#0d9488" />
-                <Text style={styles.badgeTextBlue}>LINK / WI-FI</Text>
+                <Bluetooth size={14} stroke={device ? "#0d9488" : "#64748b"} />
+                <Text style={device ? styles.badgeTextBlue : styles.badgeTextGray}>
+                  {device ? "LINK / WI-FI" : "RECONNECT"}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
