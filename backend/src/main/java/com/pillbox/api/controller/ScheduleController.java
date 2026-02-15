@@ -42,6 +42,36 @@ public class ScheduleController {
         return "Schedule Updated for Slot " + config.getSlotId();
     }
 
+    @PutMapping("/update/{id}")
+    public ResponseEntity<String> setSchedule(@PathVariable Integer id, @RequestBody Partition updatedData) {
+        // 1. Find the existing slot by ID (slotId)
+        return repository.findById(id).map(config -> {
+
+            // 2. Map basic medicine and illness info
+            config.setPillName(updatedData.getPillName());
+            config.setIllnessName(updatedData.getIllnessName());
+            config.setPillAmount(updatedData.getPillAmount());
+            config.setDosage(updatedData.getDosage());
+            config.setColorCode(updatedData.getColorCode());
+
+            // 3. Map timing and duration
+            config.setStartDate(updatedData.getStartDate());
+            config.setStartTime(updatedData.getStartTime());
+            config.setIntervalHours(updatedData.getIntervalHours());
+            config.setDurationDays(updatedData.getDurationDays());
+
+            // 4. Handle Calculated Times (If your React app still sends a list)
+            // This is useful for the hardware to have a ready-to-use comma-separated string
+            if (updatedData.getCalculatedTimes() != null) {
+                config.setCalculatedTimes(updatedData.getCalculatedTimes());
+            }
+
+            repository.save(config);
+
+            return ResponseEntity.ok("Schedule Updated for Slot " + id);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
     // 2. ESP32 calls this to get the simple list
     // Returns format: "1|08:00,12:00;2|09:00,21:00;"
     @GetMapping("/sync")
