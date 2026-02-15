@@ -36,6 +36,9 @@ Preferences preferences;
 BLECharacteristic* pNotifyChar = NULL;
 TinyGPSPlus gps;
 HardwareSerial gpsSerial(1); // Use UART1
+bool confirmationMode = false;
+unsigned long confirmationStartTime = 0;
+int pendingSlotID = 0;
 
 String savedSSID = "";
 String savedPass = "";
@@ -364,11 +367,58 @@ void triggerAlarm(int slotIdx){
   Serial.println("Alarm Triggered on slot: "+String(slotIdx));
 }
 
-void checkButtons(){
-  if(activeAlarmSlot!=-1){
-    if(digitalRead(BUTTON_YES_PIN)==LOW) resolveAlarm(true);
-    else if(digitalRead(BUTTON_NO_PIN)==LOW) resolveAlarm(false);
-  }
+void checkButtons() {
+    // 1. Handle Alarm Buttons (High Priority)
+    if (activeAlarmSlot != -1) {
+        if (digitalRead(BUTTON_YES_PIN) == LOW) resolveAlarm(true);
+        else if (digitalRead(BUTTON_NO_PIN) == LOW) resolveAlarm(false);
+        return;
+    }
+
+    // 2. Handle "Did you take a pill?" Confirmation
+    if (confirmationMode) {
+        unsigned long elapsed = millis() - confirmationStartTime;
+
+        // CHECK TIMEOUT (30 Seconds)
+        if (elapsed > 30000) {
+            Serial.println("Timeout: Auto-assuming pill taken.");
+            completeTransaction(true); // Default to YES
+            return;
+        }
+
+        // CHECK YES BUTTON
+        if (digitalRead(BUTTON_YES_PIN) == LOW) {
+            delay(200); // Debounce
+            completeTransaction(true);
+        }
+        // CHECK NO BUTTON
+        else if (digitalRead(BUTTON_NO_PIN) == LOW) {
+             delay(200); // Debounce
+             completeTransaction(false);
+        }
+    }
+}
+
+void completeTransaction(bool taken) {
+    lcd.clear();
+    if (taken) {
+        lcd.print("  Recorded: YES ");
+        Serial.println("User confirmed pill taken from Slot " + String(pendingSlotID));
+
+        // TODO: DECREMENT PILL COUNT LOGIC HERE
+        // 1. Send specific API call to backend: /api/pills/decrement?slot=pendingSlotID
+        // 2. OR Update local struct: slots[pendingSlotID-1].pillCount--;
+    } else {
+        lcd.print("  Recorded: NO  ");
+        Serial.println("User said NO (just checking box).");
+    }
+
+    delay(2000); // Show result for 2 seconds
+
+    // Reset State
+    confirmationMode = false;
+    pendingSlotID = 0;
+    lcd.clear(); // Clear so updateDisplay() can redraw home screen
 }
 
 void resolveAlarm(bool taken){
@@ -394,55 +444,75 @@ void resolveAlarm(bool taken){
   delay(1500); // Short freeze for UI feedback
 }
 
-void updateSensors(){
-  lockedSensorID=0;
-  for(int i=0;i<4;i++){
-    if(digitalRead(SENSOR_PINS[i])==LOW){
-      lockedSensorID=i+1;
-      // Safety: Turn off buzzer if user pulls the pill out
-      if(activeAlarmSlot==i) digitalWrite(BUZZER_PIN, LOW);
+void updateSensors() {
+  // If we are already asking a question, don't re-trigger
+  if (confirmationMode) return;
+
+  lockedSensorID = 0;
+  for (int i = 0; i < 4; i++) {
+    // Check if sensor is blocked (LOW)
+    if (digitalRead(SENSOR_PINS[i]) == LOW) {
+      lockedSensorID = i + 1;
+
+      // Safety: If an alarm was ringing for this slot, silence it immediately
+      if (activeAlarmSlot == i) {
+          digitalWrite(BUZZER_PIN, LOW);
+          // Note: We don't ask "Did you take it?" if it was an ALARM.
+          // The alarm logic handles that separately in resolveAlarm().
+      }
+      // If NO alarm is active, this is a random pill access. Ask the question.
+      else if (activeAlarmSlot == -1) {
+          startConfirmation(i + 1);
+      }
     }
   }
 }
 
-void updateDisplay(){
-  static bool lastAlarmState = false;
-  if(lastAlarmState != (activeAlarmSlot != -1)){
+void startConfirmation(int slotID) {
+    confirmationMode = true;
+    pendingSlotID = slotID;
+    confirmationStartTime = millis();
+
     lcd.clear();
-    lastAlarmState = (activeAlarmSlot != -1);
-  }
+    lcd.setCursor(0, 0); lcd.print("Slot " + String(slotID) + " Opened!");
+    lcd.setCursor(0, 1); lcd.print("Taken? (Yes/No)");
+    Serial.println("Confirmation Mode Started for Slot " + String(slotID));
+}
 
-  if(activeAlarmSlot != -1){
-    lcd.setCursor(0,0); lcd.print("! ALARM ACTIVE !");
-    lcd.setCursor(0,1);
-    if(lockedSensorID == (activeAlarmSlot+1)) lcd.print(" CONFIRM? (Y/N) ");
-    else lcd.print("  TAKE A PILL   ");
-    return;
-  }
+void updateDisplay() {
+    // If asking a question, FREEZE the display (don't overwrite it)
+    if (confirmationMode) return;
 
-  // --- MODIFIED STATUS DISPLAY ---
-  lcd.setCursor(0,0);
-  if(lockedSensorID > 0) {
-    lcd.print("Taking Slot "); lcd.print(lockedSensorID);
-  } else {
+    // Standard Display Logic
+    static bool lastAlarmState = false;
+    if (lastAlarmState != (activeAlarmSlot != -1)) {
+        lcd.clear();
+        lastAlarmState = (activeAlarmSlot != -1);
+    }
+
+    if (activeAlarmSlot != -1) {
+        lcd.setCursor(0, 0); lcd.print("! ALARM ACTIVE !");
+        lcd.setCursor(0, 1); lcd.print(" CONFIRM? (Y/N) ");
+        return;
+    }
+
+    // Normal Home Screen
+    lcd.setCursor(0, 0);
     lcd.print("MedBox Pro      ");
-  }
 
-  lcd.setCursor(0,1);
+    lcd.setCursor(0, 1);
+    // 1. Check Wi-Fi First
+    if (WiFi.status() != WL_CONNECTED) {
+        lcd.print("No WiFi Connect ");
+        return;
+    }
 
-  // 1. Check Wi-Fi First
-  if (WiFi.status() != WL_CONNECTED){
-    lcd.print("No WiFi Connect ");
-    return;
-  }
-
-  // 2. Check Time Second
-  struct tm timeinfo;
-  if(getLocalTime(&timeinfo, 500)){ // Wait only 500ms max
-    lcd.printf("%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
-    lcd.print(" WiFi:OK ");
-  } else {
-    // If WiFi is connected but Time is missing, it's an NTP error
-    lcd.print("NTP Error/Sync..");
-  }
+    // 2. Check Time Second
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo, 500)) {
+        lcd.printf("%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+        lcd.print(" WiFi:OK ");
+    } else {
+        lcd.print("NTP Error/Sync..");
+    }
 }
