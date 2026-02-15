@@ -3,6 +3,7 @@ package com.pillbox.api.controller;
 import com.pillbox.api.model.MedicationConfig;
 import com.pillbox.api.repository.MedicationConfigRepository; // You'll need to create this simple interface
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalTime;
@@ -22,35 +23,43 @@ public class ScheduleController {
     // 1. App sends settings here
     @PostMapping("/set")
     public String setSchedule(@RequestBody MedicationConfig config) {
+
+        // --- VALIDATION LOCK ---
+        // Ensure we only touch Slots 1-4
+        if (config.getSlotId() == null || config.getSlotId() < 1 || config.getSlotId() > 4) {
+            throw new RuntimeException("ERROR: Only Slots 1-4 are allowed.");
+        }
+
         List<String> times = new ArrayList<>();
-        LocalTime current = config.getStartTime();
 
-        // Safety: Prevent infinite loops if interval is 0
-        if (config.getIntervalHours() <= 0) config.setIntervalHours(24);
+        // Use existing start time or default to now if missing
+        LocalTime current = (config.getStartTime() != null) ? config.getStartTime() : LocalTime.now();
+        LocalTime start = current;
 
-        // Keep adding times as long as we are still in the SAME day
-        // AND we haven't exceeded a safety limit (e.g. 24)
-        LocalTime start = config.getStartTime();
+        // Safety: Prevent infinite loops if interval is 0 (disable alarms)
+        if (config.getIntervalHours() <= 0) {
+            config.setCalculatedTimes(""); // Clear alarms
+            repository.save(config);
+            return "Alarms Disabled for Slot " + config.getSlotId();
+        }
 
+        // Logic to generate 08:00, 12:00, etc.
         do {
             times.add(current.format(DateTimeFormatter.ofPattern("HH:mm")));
-
-            // Move to next interval
             current = current.plusHours(config.getIntervalHours());
+        } while (current.isAfter(start) && times.size() < 24); // Limit to 24 alarms max
 
-            // STOP if the new time is earlier than the start time (meaning we crossed midnight)
-            // OR if the new time is exactly the start time (24-hour loop)
-        } while (current.isAfter(start) && times.size() < 24);
-
-        // Join into string "08:00,12:00,16:00..."
+        // Join into string "08:00,12:00..."
         config.setCalculatedTimes(String.join(",", times));
 
+        // JPA "save" acts as an UPDATE because the ID (1-4) already exists
         repository.save(config);
+
         return "Schedule Updated for Slot " + config.getSlotId();
     }
 
     @PutMapping("/update/{id}")
-    public ResponseEntity<String> setSchedule(@PathVariable Integer id, @RequestBody Partition updatedData) {
+    public ResponseEntity<String> setSchedule(@PathVariable Integer id, @RequestBody MedicationConfig updatedData) {
         // 1. Find the existing slot by ID (slotId)
         return repository.findById(id).map(config -> {
 
@@ -92,5 +101,17 @@ public class ScheduleController {
             sb.append(c.getSlotId()).append("|").append(c.getCalculatedTimes()).append(";");
         }
         return sb.toString();
+    }
+
+    @PostMapping("/decrement/{slotId}")
+    public String decrementPills(@PathVariable Integer slotId) {
+        MedicationConfig config = repository.findById(slotId).orElse(null);
+        if (config != null && config.getPillAmount() > 0) {
+            config.setPillAmount(config.getPillAmount() - 1);
+            repository.save(config);
+            System.out.println(">>> PILL TAKEN! Slot " + slotId + " count is now: " + config.getPillAmount());
+            return "Decremented";
+        }
+        return "Slot not found or empty";
     }
 }

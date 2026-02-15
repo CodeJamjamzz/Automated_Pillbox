@@ -14,25 +14,22 @@ public class DataInitializer {
     @Bean
     CommandLineRunner initDatabase(MedicationConfigRepository repository) {
         return args -> {
-            // Only add data if the database is empty
-            if (repository.count() == 0) {
-                System.out.println(">>> DATABASE IS EMPTY. AUTO-FILLING DEFAULT SCHEDULE...");
+            // Loop through IDs 1 to 4
+            for (int i = 1; i <= 4; i++) {
+                // Try to find the slot. If it doesn't exist, create it.
+                if (!repository.existsById(i)) {
+                    MedicationConfig defaultSlot = new MedicationConfig();
+                    defaultSlot.setSlotId(i); // Force ID 1, 2, 3, or 4
+                    defaultSlot.setPillName("Empty Slot " + i);
+                    defaultSlot.setStartTime(LocalTime.of(8, 0)); // Default 08:00 AM
+                    defaultSlot.setIntervalHours(0); // No alarms by default
+                    defaultSlot.setCalculatedTimes(""); // No alarms string
 
-                MedicationConfig config = new MedicationConfig();
-                config.setSlotId(1);
-                config.setPillName("Test Pill");
-                config.setTakerName("Grandma");
-                config.setPillAmount(10);
-                config.setStartTime(LocalTime.of(8, 0)); // 8:00 AM
-                config.setIntervalHours(4);
-
-                // Pre-calculate the times string for the ESP32
-                config.setCalculatedTimes("08:00,12:00,16:00,20:00");
-
-                repository.save(config);
-
-                System.out.println(">>> DEFAULT SCHEDULE ADDED! ESP32 WILL NO LONGER CRASH.");
+                    repository.save(defaultSlot);
+                    System.out.println(">>> Created Default Entry for Slot " + i);
+                }
             }
+            System.out.println(">>> Database initialized with 4 Fixed Slots.");
         };
     }
 }
