@@ -15,8 +15,11 @@ public class MedicationConfig {
     private Integer slotId; // 1, 2, 3, or 4 (Manually assigned)
 
     private String pillName;
-    private String takerName;
+    private String illnessName;
     private int pillAmount;
+    private String dosage;
+    private LocalTime startDate;
+    private String colorCode;
 
     private LocalTime startTime;
     private int intervalHours; // e.g., 4, 6, 8, 12, 24
@@ -42,12 +45,12 @@ public class MedicationConfig {
         this.pillName = pillName;
     }
 
-    public String getTakerName() {
-        return takerName;
+    public String getillnessName() {
+        return illnessName;
     }
 
-    public void setTakerName(String takerName) {
-        this.takerName = takerName;
+    public void setillnessName(String illnessName) {
+        this.illnessName = illnessName;
     }
 
     public int getPillAmount() {
@@ -89,4 +92,17 @@ public class MedicationConfig {
     public void setCalculatedTimes(String calculatedTimes) {
         this.calculatedTimes = calculatedTimes;
     }
+
+    public String getDosage() { return dosage; }
+
+    public void setDosage(String dosage) { this.dosage = dosage; }
+
+    public LocalTime getStartDate() { return startDate; }
+
+    public void setStartDate(LocalTime startDate) { this.startDate = startDate; }
+
+    public void getcolorCode() { return this.colorCode; }
+
+    public void setcolorCode(String colorCode) { this.colorCode = colorCode; }
+
 }
