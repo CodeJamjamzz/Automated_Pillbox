@@ -22,20 +22,27 @@ public class ScheduleController {
     // 1. App sends settings here
     @PostMapping("/set")
     public String setSchedule(@RequestBody MedicationConfig config) {
-        // Calculate the alarms based on Start Time and Interval
         List<String> times = new ArrayList<>();
         LocalTime current = config.getStartTime();
 
-        // Limit to max 4 alarms per day as requested
-        for (int i = 0; i < 4; i++) {
+        // Safety: Prevent infinite loops if interval is 0
+        if (config.getIntervalHours() <= 0) config.setIntervalHours(24);
+
+        // Keep adding times as long as we are still in the SAME day
+        // AND we haven't exceeded a safety limit (e.g. 24)
+        LocalTime start = config.getStartTime();
+
+        do {
             times.add(current.format(DateTimeFormatter.ofPattern("HH:mm")));
+
+            // Move to next interval
             current = current.plusHours(config.getIntervalHours());
 
-            // Break if we wrap around to the next day (optional logic)
-            // if (current.isBefore(config.getStartTime())) break;
-        }
+            // STOP if the new time is earlier than the start time (meaning we crossed midnight)
+            // OR if the new time is exactly the start time (24-hour loop)
+        } while (current.isAfter(start) && times.size() < 24);
 
-        // Join into string "08:00,12:00,16:00"
+        // Join into string "08:00,12:00,16:00..."
         config.setCalculatedTimes(String.join(",", times));
 
         repository.save(config);
