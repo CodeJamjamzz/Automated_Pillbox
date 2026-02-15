@@ -33,4 +33,14 @@ public class SensorData {
     public void setSensor3(boolean sensor3) { this.sensor3 = sensor3; }
     public void setSensor4(boolean sensor4) { this.sensor4 = sensor4; }
     public void setGpsCoordinates(String gpsCoordinates) { this.gpsCoordinates = gpsCoordinates; }
+    @Override
+    public String toString() {
+        return "Sensors[" +
+                (sensor1 ? "FULL" : "EMPTY") + ", " +
+                (sensor2 ? "FULL" : "EMPTY") + ", " +
+                (sensor3 ? "FULL" : "EMPTY") + ", " +
+                (sensor4 ? "FULL" : "EMPTY") +
+                "] GPS: " + gpsCoordinates;
+    }
+
 }

@@ -43,9 +43,11 @@ public class ScheduleController {
     }
 
     // 2. ESP32 calls this to get the simple list
-    // Returns format: "1|08:00,12:00;2|09:00,21:00;"
     @GetMapping("/sync")
     public String getSyncData() {
+        // --- ADDED LOG ---
+        System.out.println(">>> ESP32 REQUESTED SCHEDULE SYNC");
+
         List<MedicationConfig> configs = repository.findAll();
         StringBuilder sb = new StringBuilder();
 
