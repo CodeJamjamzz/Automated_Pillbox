@@ -16,8 +16,24 @@ public class MedicationConfig {
 
     private String pillName;
     private String illnessName;
-    private int pillAmount;
 
+    public String getIllnessName() {
+        return illnessName;
+    }
+
+    public void setIllnessName(String illnessName) {
+        this.illnessName = illnessName;
+    }
+
+    public String getColorCode() {
+        return colorCode;
+    }
+
+    public void setColorCode(String colorCode) {
+        this.colorCode = colorCode;
+    }
+
+    private int pillAmount;
     private String dosage;
     private LocalTime startDate;
     private String colorCode;
@@ -26,15 +42,17 @@ public class MedicationConfig {
     private int intervalHours; // e.g., 4, 6, 8, 12, 24
     private int durationDays;  // Optional
 
-
-
+    // We store the calculated times as a simple string for the ESP32
+    // Format: "08:00,12:00,16:00"
     private String calculatedTimes;
 
     public Integer getSlotId() {
         return slotId;
     }
 
-    public void setSlotId(Integer slotId) { this.slotId = slotId; }
+    public void setSlotId(Integer slotId) {
+        this.slotId = slotId;
+    }
 
     public String getPillName() {
         return pillName;
@@ -44,11 +62,11 @@ public class MedicationConfig {
         this.pillName = pillName;
     }
 
-    public String getIllnessName() {
+    public String getillnessName() {
         return illnessName;
     }
 
-    public void setIllnessName(String illnessName) {
+    public void setillnessName(String illnessName) {
         this.illnessName = illnessName;
     }
 
@@ -92,15 +110,16 @@ public class MedicationConfig {
         this.calculatedTimes = calculatedTimes;
     }
 
-    public java.lang.String getDosage() { return dosage; }
+    public String getDosage() { return dosage; }
 
-    public void setDosage(java.lang.String dosage) { this.dosage = dosage;}
+    public void setDosage(String dosage) { this.dosage = dosage; }
 
-    public LocalTime getStartDate() {return startDate;}
+    public LocalTime getStartDate() { return startDate; }
 
-    public void setStartDate(LocalTime startDate) {this.startDate = startDate;}
+    public void setStartDate(LocalTime startDate) { this.startDate = startDate; }
 
-    public java.lang.String getColorCode() {return colorCode;}
+    public String getcolorCode() { return this.colorCode; }
 
-    public void setColorCode(java.lang.String colorCode) { this.colorCode = colorCode; }
+    public void setcolorCode(String colorCode) { this.colorCode = colorCode; }
+
 }

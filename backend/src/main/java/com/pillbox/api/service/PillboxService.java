@@ -26,7 +26,8 @@ public class PillboxService {
         PillLog log = new PillLog(newData);
         repository.save(log);
 
-        System.out.println("State Updated & Saved to DB");
+        // --- CHANGED THIS LINE FOR BETTER LOGGING ---
+        System.out.println(">>> RECEIVED DATA: " + newData.toString());
     }
 
     public SensorData getCurrentState() {

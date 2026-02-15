@@ -9,429 +9,510 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <Preferences.h>
+#include <time.h>
+#include <mbedtls/base64.h>
 
-// ==========================================
-//          MASTER PIN DEFINITIONS
-// ==========================================
-
+// ================= PIN DEFINITIONS =================
 #define LCD_SDA_PIN  21
 #define LCD_SCL_PIN  22
-#define GPS_RX_PIN   16
-#define GPS_TX_PIN   17
-#define SIM_RX_PIN   26
-#define SIM_TX_PIN   27
 #define BUTTON_YES_PIN 4
 #define BUTTON_NO_PIN  5
 #define BUZZER_PIN     18
-#define IR_PIN_1     34
-#define IR_PIN_2     35
-#define IR_PIN_3     13
-#define IR_PIN_4     23
-#define LED_PIN_1    32
-#define LED_PIN_2    15
-#define LED_PIN_3    25
-#define LED_PIN_4    19
+#define GPS_RX_PIN     16
+#define GPS_TX_PIN     17
 
-// ==========================================
-//               GLOBAL OBJECTS
-// ==========================================
+const int SENSOR_PINS[4] = {34, 35, 13, 23};
+const int LED_PINS[4]    = {32, 15, 25, 19};
 
-String SERVER_URL = "http://192.168.1.5:8080/api/pillbox/update"; // CHECK YOUR IP
-
-// BLE UUIDs
+// ================= UUIDS =================
 #define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHAR_SENSOR_UUID       "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHAR_GPS_UUID          "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHAR_WIFI_CONFIG_UUID  "6E400004-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHAR_WIFI_UUID         "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHAR_SCHEDULE_UUID     "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHAR_NOTIFY_UUID       "6E400004-B5A3-F393-E0A9-E50E24DCCA9E"
 
+// ================= GLOBALS =================
 LiquidCrystal_I2C lcd(0x27, 16, 2);
-
-const int SENSOR_PINS[4] = {IR_PIN_1, IR_PIN_2, IR_PIN_3, IR_PIN_4};
-const int LED_PINS[4]    = {LED_PIN_1, LED_PIN_2, LED_PIN_3, LED_PIN_4};
-
-TinyGPSPlus gps;
-HardwareSerial GPS_Serial(2);
-HardwareSerial SIM_Serial(1);
-const int GPSBaud = 9600;
-
-// --- GLOBAL VARIABLES ---
 Preferences preferences;
-BLEServer* pServer = NULL;
+BLECharacteristic* pNotifyChar = NULL;
+TinyGPSPlus gps;
+HardwareSerial gpsSerial(1); // Use UART1
+bool confirmationMode = false;
+unsigned long confirmationStartTime = 0;
+int pendingSlotID = 0;
 
-// 1. GLOBALS FOR WIFI CREDENTIALS (Moved to top)
 String savedSSID = "";
 String savedPass = "";
+// WARNING: Use your PC's IP here, NOT localhost
+String SERVER_URL = "http://172.20.10.5:8080/api/pillbox/update";
+String SCHEDULE_URL = "http://172.20.10.5:8080/api/schedule/sync";
 
-BLECharacteristic* pSensorChar = NULL;
-BLECharacteristic* pGpsChar    = NULL;
+// Time Settings
+const char* ntpServer = "pool.ntp.org";
+const long  gmtOffset_sec = 28800; // UTC+8
+const int   daylightOffset_sec = 0;
 
+// Unified Alarm Structure (Single Source of Truth)
+struct Compartment {
+  String alarms[4]; // Stores "HH:MM"
+  int alarmCount = 0;
+};
+Compartment slots[4];
+
+// State Variables
+unsigned long lastSyncTime = 0;
+unsigned long lastUpdate = 0; // Fixed: Was missing
+int activeAlarmSlot = -1;
+int lockedSensorID = 0;
 bool deviceConnected = false;
 bool wifiConnected = false;
+int lastTriggeredMinute = -1; // New: Prevents double alarms without blocking delay
 
-// 2. CHANGED: Replaced 'shouldReboot' with 'shouldConnect'
-bool shouldConnect = false;
+// ================= HELPER FUNCTIONS =================
 
-unsigned long lastSendTime = 0;
-const int SEND_INTERVAL = 2000;
-unsigned long lastDisplayTime = 0;
-const int DISPLAY_INTERVAL = 100;
-unsigned long bleConnectTime = 0;
-unsigned long lastWifiRetry = 0; // For background reconnection
+String decodeBase64(String input) {
+  unsigned char output[128];
+  size_t olen = 0;
+  mbedtls_base64_decode(output, 128, &olen, (const unsigned char*)input.c_str(), input.length());
+  return String((char*)output).substring(0, olen);
+}
 
-int lockedSensorID = 0;
-int lastTriggeredSensor = 0;
-bool alarmActive = false;
-bool confirmationSent = false;
+// Unified Parsing Logic (Used by BOTH WiFi and BLE)
+void parseSchedule(String payload) {
+  // Format expected: "1|08:00,12:00;2|09:00;"
+  // Note: App/Backend uses 1-based indexing, array uses 0-based
 
-// --- BLE CALLBACKS ---
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      bleConnectTime = millis();
-    };
+  // Safety check: Don't wipe everything if payload is empty
+  // 1. SAFETY CHECK: If payload is empty or too short, stop immediately.
+  if (payload.length() == 0 || payload == "{}") {
+    Serial.println("Schedule is empty, skipping parse.");
+    return;
+  }
 
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-      BLEDevice::startAdvertising();
+  // Clear old schedules
+  for(int i=0; i<4; i++) slots[i].alarmCount = 0;
+
+  int start = 0;
+  while (start < payload.length()) {
+    int end = payload.indexOf(';', start);
+    if (end == -1) end = payload.length();
+
+    String segment = payload.substring(start, end);
+
+    int pipe = segment.indexOf('|');
+    if (pipe != -1) {
+      int slotID = segment.substring(0, pipe).toInt() - 1;
+      if (slotID >= 0 && slotID < 4) {
+        String times = segment.substring(pipe + 1);
+
+        int tStart = 0;
+        int count = 0;
+        while (tStart < times.length() && count < 4) {
+          int tEnd = times.indexOf(',', tStart);
+          if (tEnd == -1) tEnd = times.length();
+
+          slots[slotID].alarms[count] = times.substring(tStart, tEnd);
+          count++;
+          tStart = tEnd + 1;
+        }
+        slots[slotID].alarmCount = count;
+        Serial.printf("Slot %d updated with %d alarms.\n", slotID+1, count);
+      }
     }
+    start = end + 1;
+  }
+}
+
+// ================= COMMUNICATIONS =================
+
+// 1. Send Sensor Data to Spring Boot
+void sendToSpringboot() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(SERVER_URL);
+    http.addHeader("Content-Type", "application/json");
+
+    // Read Sensors
+    bool s1 = digitalRead(SENSOR_PINS[0]) == LOW;
+    bool s2 = digitalRead(SENSOR_PINS[1]) == LOW;
+    bool s3 = digitalRead(SENSOR_PINS[2]) == LOW;
+    bool s4 = digitalRead(SENSOR_PINS[3]) == LOW;
+
+    // Default GPS to avoid "null" errors
+    String gpsCoords = "0.0,0.0";
+    if (gps.location.isValid()) {
+      gpsCoords = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6);
+    }
+
+    // --- JSON CONSTRUCTION FIX ---
+    // We use \" to ensure quotes are placed correctly around strings, but NOT booleans
+    String jsonPayload = "{";
+    jsonPayload += "\"sensor1\": " + String(s1 ? "true" : "false") + ",";
+    jsonPayload += "\"sensor2\": " + String(s2 ? "true" : "false") + ",";
+    jsonPayload += "\"sensor3\": " + String(s3 ? "true" : "false") + ",";
+    jsonPayload += "\"sensor4\": " + String(s4 ? "true" : "false") + ",";
+    jsonPayload += "\"gpsCoordinates\": \"" + gpsCoords + "\"";
+    jsonPayload += "}";
+
+    // Debug Print (So you can see exactly what you are sending)
+    Serial.println("Sending Payload: " + jsonPayload);
+
+    int httpResponseCode = http.POST(jsonPayload);
+
+    if (httpResponseCode > 0) {
+      Serial.println("Spring Boot Response: " + String(httpResponseCode)); // Look for 200 here
+    } else {
+      Serial.println("Error Sending: " + String(httpResponseCode));
+    }
+    http.end();
+  }
+}
+// 2. Sync Schedule from Spring Boot
+void syncSchedule() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(SCHEDULE_URL);
+    int httpCode = http.GET();
+
+    if (httpCode == 200) {
+      String payload = http.getString();
+      Serial.println("Syncing: " + payload);
+      parseSchedule(payload);
+    }
+    http.end();
+  }
+}
+
+// ================= BLE CALLBACKS =================
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) { deviceConnected = true; };
+    void onDisconnect(BLEServer* pServer) { deviceConnected = false; BLEDevice::startAdvertising(); }
 };
 
 class WifiCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-      // 1. Get raw value from BLE
-      String value = pCharacteristic->getValue();
+      String encoded = pCharacteristic->getValue().c_str();
+      if (encoded.length() == 0) return;
 
-      if (value.length() > 0) {
-        String data = value;
+      String decoded = decodeBase64(encoded);
+      int split = decoded.indexOf(':');
 
-        // --- DEBUGGING: Print EXACTLY what is received ---
-        Serial.println("\n========== [BLE DATA RECEIVED] ==========");
-        Serial.print("Raw String: \"");
-        Serial.print(data);
-        Serial.println("\"");
+      if (split > 0) {
+        String ssid = decoded.substring(0, split);
+        String pass = decoded.substring(split + 1);
 
-        // Print HEX values to check for hidden characters
-        // Period (.) is 2E. Comma (,) is 2C.
-        Serial.print("Hex Dump:   ");
-        for(int i=0; i<data.length(); i++) {
-            Serial.printf("%02X ", (uint8_t)data[i]);
-        }
-        Serial.println();
-        // --------------------------------------------------
+        preferences.begin("wifi_conf", false);
+        preferences.putString("ssid", ssid);
+        preferences.putString("pass", pass);
+        preferences.end();
 
-        // 2. Parse Logic
-        // We look for the FIRST comma.
-        // NOTE: If your SSID contains a comma (e.g., "My,Wifi"), this will fail.
-        int commaIndex = data.indexOf(',');
+        // --- FIX: Disconnect before reconnecting ---
+        WiFi.disconnect();
+        delay(100);
+        WiFi.begin(ssid.c_str(), pass.c_str());
 
-        if (commaIndex > 0) {
-          // Split the string
-          String ssid = data.substring(0, commaIndex);
-          String pass = data.substring(commaIndex + 1); // +1 skips the comma itself
-
-          // 3. Clean up
-          // trim() removes Spaces (0x20), Newlines (0x0A/0x0D), Tabs (0x09)
-          // It DOES NOT remove periods (0x2E) or other punctuation.
-          ssid.trim();
-          pass.trim();
-
-          Serial.println("--- [PARSED CREDENTIALS] ---");
-          Serial.print("SSID: \""); Serial.print(ssid); Serial.println("\"");
-          Serial.print("PASS: \""); Serial.print(pass); Serial.println("\"");
-
-          // 4. Save & Trigger Connect
-          if (ssid != savedSSID || pass != savedPass) {
-             Serial.println(">>> New credentials detected. Saving...");
-             savedSSID = ssid;
-             savedPass = pass;
-
-             preferences.begin("wifi_conf", false);
-             preferences.putString("ssid", ssid);
-             preferences.putString("pass", pass);
-             preferences.end();
-
-             shouldConnect = true;
-          } else {
-             Serial.println(">>> Credentials identical to saved. Ignoring.");
-          }
-        }
-        else {
-           Serial.println("ERROR: Separator ',' not found. Format must be 'SSID,PASS'");
-        }
-        Serial.println("=========================================\n");
+        lcd.clear();
+        lcd.print("New WiFi Set!");
       }
     }
 };
 
+class ScheduleCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      String val = pCharacteristic->getValue().c_str();
+      // Reuse the same parsing logic!
+      // Ensure React Native sends format: "1|08:00,12:00;"
+      if (val.length() > 0) {
+         Serial.println("BLE Schedule Recv: " + val);
+         parseSchedule(val);
+      }
+    }
+};
+
+// ================= SETUP =================
+// ================= DEBUG SETUP =================
 void setup() {
   Serial.begin(115200);
 
-  GPS_Serial.begin(GPSBaud, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-  SIM_Serial.begin(9600, SERIAL_8N1, SIM_RX_PIN, SIM_TX_PIN);
-
-  Wire.begin(LCD_SDA_PIN, LCD_SCL_PIN);
-  lcd.init();
-  lcd.backlight();
-
-  for (int i = 0; i < 4; i++) {
-    pinMode(SENSOR_PINS[i], INPUT);
-    pinMode(LED_PINS[i], OUTPUT);
-    digitalWrite(LED_PINS[i], LOW);
-  }
-
+  // 1. Initialize Hardware
+  gpsSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  lcd.init(); lcd.backlight();
   pinMode(BUTTON_YES_PIN, INPUT_PULLUP);
   pinMode(BUTTON_NO_PIN, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
 
-  digitalWrite(BUZZER_PIN, HIGH); delay(100); digitalWrite(BUZZER_PIN, LOW);
+  // Setup Sensors
+  for(int i=0; i<4; i++){
+    if(SENSOR_PINS[i]>=34 && SENSOR_PINS[i]<=39) pinMode(SENSOR_PINS[i], INPUT);
+    else pinMode(SENSOR_PINS[i], INPUT_PULLUP);
+    pinMode(LED_PINS[i], OUTPUT); digitalWrite(LED_PINS[i], LOW);
+  }
 
-  // --- BLE SETUP ---
-  BLEDevice::init("MedBox Device");
-  pServer = BLEDevice::createServer();
+  // 2. BLE Setup
+  BLEDevice::init("MedBox Pro");
+  BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
-
   BLEService *pService = pServer->createService(SERVICE_UUID);
-
-  BLECharacteristic *pWifiChar = pService->createCharacteristic(
-                                   CHAR_WIFI_CONFIG_UUID,
-                                   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
-                                 );
-  pWifiChar->setCallbacks(new WifiCallbacks());
-
-  pSensorChar = pService->createCharacteristic(
-                                     CHAR_SENSOR_UUID,
-                                     BLECharacteristic::PROPERTY_NOTIFY
-                                   );
-  pSensorChar->addDescriptor(new BLE2902());
-
-  pGpsChar = pService->createCharacteristic(
-                                  CHAR_GPS_UUID,
-                                  BLECharacteristic::PROPERTY_NOTIFY
-                                );
-  pGpsChar->addDescriptor(new BLE2902());
-
+  pService->createCharacteristic(CHAR_WIFI_UUID, BLECharacteristic::PROPERTY_WRITE)->setCallbacks(new WifiCallbacks());
+  pService->createCharacteristic(CHAR_SCHEDULE_UUID, BLECharacteristic::PROPERTY_WRITE)->setCallbacks(new ScheduleCallbacks());
+  pNotifyChar = pService->createCharacteristic(CHAR_NOTIFY_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  pNotifyChar->addDescriptor(new BLE2902());
   pService->start();
-
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);
   BLEDevice::startAdvertising();
 
-  // --- WIFI SETUP ---
-  preferences.begin("wifi_conf", true);
-  savedSSID = preferences.getString("ssid", ""); // Load into global
-  savedPass = preferences.getString("pass", ""); // Load into global
-  preferences.end();
+  // 3. Wi-Fi Connection (VERBOSE DEBUGGING)
+  savedSSID = "AJ Lomocso"; // Verify this is 2.4GHz (ESP32 cannot see 5GHz)
+  savedPass = "piyang2004";
 
-  if(savedSSID != "") {
-    lcd.setCursor(0, 0); lcd.print("Connecting...");
-    WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi Connecting...");
+  Serial.println("\n--------------------------------");
+  Serial.println("Starting Wi-Fi Connection...");
+  Serial.print("Target SSID: "); Serial.println(savedSSID);
 
-    // Quick blocking check on startup (optional, good for user feedback)
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) { // 10 seconds wait
-        delay(500);
-        attempts++;
-        Serial.print(".");
-    }
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
 
-    if(WiFi.status() == WL_CONNECTED) {
-      wifiConnected = true;
-      lcd.clear(); lcd.print("Online!"); delay(1000);
-    }
+  WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+
+  // Wait up to 15 seconds for connection
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
   }
-  lcd.clear();
+
+  // Report Result
+  Serial.println("\n--------------------------------");
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiConnected = true;
+    Serial.println("SUCCESS: Wi-Fi Connected!");
+    Serial.print("IP Address: "); Serial.println(WiFi.localIP());
+    Serial.print("Signal Strength (RSSI): "); Serial.println(WiFi.RSSI());
+    lcd.setCursor(0, 1); lcd.print("Success!");
+
+    // 4. Start Time Sync ONLY after Wi-Fi is good
+    Serial.println("Starting NTP Time Sync...");
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  } else {
+    Serial.println("FAILURE: Could not connect to Wi-Fi.");
+    Serial.print("Error Code: "); Serial.println(WiFi.status());
+    // Codes: 1=No SSID, 4=Connect Fail, 5=Lost, 6=Disconnected
+    lcd.setCursor(0, 1); lcd.print("WiFi Failed!");
+  }
+  Serial.println("--------------------------------\n");
 }
 
-void loop() {
-  while (GPS_Serial.available() > 0) gps.encode(GPS_Serial.read());
+// ================= DEBUG LOOP =================
+void loop(){
+  // 1. GPS Feed
+  while (gpsSerial.available() > 0) gps.encode(gpsSerial.read());
 
-  updateSensorLock();
-  updateLEDs();
+  // FORCE SEND every 3 seconds
+  if (millis() - lastUpdate > 3000) {
+     Serial.println("--- LOOP: Attempting to Send Sensor Data ---"); // Debug print
+     sendToSpringboot();
+     lastUpdate = millis();
+  }
+
+  if (millis() - lastSyncTime > 60000 || lastSyncTime == 0) {
+    if(wifiConnected) {
+        syncSchedule();
+        lastSyncTime = millis();
+    }
+  }
+
+  checkLocalSchedule();
+  updateSensors();
   checkButtons();
-  notifyAppOfSensors();
+  updateDisplay(); // See modified function below
 
-  // 4. HANDLING NEW CREDENTIALS WITHOUT REBOOT
-  if (shouldConnect) {
-     shouldConnect = false; // Reset flag
+  delay(50);
+}
 
-     lcd.clear();
-     lcd.setCursor(0, 0);
-     lcd.print("New WiFi...");
+// ================= LOGIC =================
+void checkLocalSchedule(){
+  struct tm timeinfo;
+  if(getLocalTime(&timeinfo)){
 
-     // Disconnect previous and start new
-     WiFi.disconnect(true);
-     delay(500);
-     WiFi.mode(WIFI_STA);    // Ensure Station mode
-     WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+    // Safety: Only trigger if we haven't already triggered this minute
+    if (timeinfo.tm_min == lastTriggeredMinute) return;
 
-     lastWifiRetry = millis(); // Reset retry timer so background logic waits
-     Serial.println("Attempting connection to new WiFi: " + savedSSID);
-  }
+    char timeStr[6];
+    sprintf(timeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
 
-  if (alarmActive) {
-    digitalWrite(BUZZER_PIN, HIGH);
-  } else {
-    digitalWrite(BUZZER_PIN, LOW);
-  }
-
-  if (millis() - lastDisplayTime > DISPLAY_INTERVAL) {
-    lastDisplayTime = millis();
-    displayStatus();
-  }
-
-  // 5. BACKGROUND RECONNECTION LOGIC
-  if (wifiConnected && (millis() - lastSendTime > SEND_INTERVAL)) {
-    lastSendTime = millis();
-    sendDataToServer();
-  }
-
-  // Check if WiFi dropped, try to reconnect every 10s
-  if (WiFi.status() != WL_CONNECTED) {
-     wifiConnected = false;
-     if (millis() - lastWifiRetry > 10000 && savedSSID != "") {
-        Serial.println("WiFi lost. Reconnecting...");
-        WiFi.disconnect();
-        WiFi.begin(savedSSID.c_str(), savedPass.c_str());
-        lastWifiRetry = millis();
-     }
-  } else {
-     wifiConnected = true;
+    for(int s=0; s<4; s++) {
+      for(int a=0; a < slots[s].alarmCount; a++) {
+        // Simple String comparison
+        if(slots[s].alarms[a].equals(timeStr) && activeAlarmSlot == -1) {
+             triggerAlarm(s);
+             lastTriggeredMinute = timeinfo.tm_min; // Lock this minute
+        }
+      }
+    }
   }
 }
 
-// ... (Rest of functions: notifyAppOfSensors, checkButtons, updateSensorLock, updateLEDs, displayStatus, sendDataToServer remain EXACTLY the same) ...
+void triggerAlarm(int slotIdx){
+  activeAlarmSlot = slotIdx;
+  digitalWrite(BUZZER_PIN, HIGH);
+  digitalWrite(LED_PINS[slotIdx], HIGH);
 
-void notifyAppOfSensors() {
-  if (!deviceConnected) return;
-  int currentActiveSensor = 0;
-  for (int i = 0; i < 4; i++) {
-    if (!digitalRead(SENSOR_PINS[i])) {
-       currentActiveSensor = i + 1;
-       break;
-    }
+  if(deviceConnected){
+    String msg = "CONFIRM:"+String(slotIdx+1);
+    pNotifyChar->setValue(msg.c_str());
+    pNotifyChar->notify();
   }
-  if (currentActiveSensor != lastTriggeredSensor) {
-    lastTriggeredSensor = currentActiveSensor;
-    String message = String(currentActiveSensor);
-    pSensorChar->setValue(message.c_str());
-    pSensorChar->notify();
-    Serial.println("Sent Sensor Update: " + message);
-  }
+  Serial.println("Alarm Triggered on slot: "+String(slotIdx));
 }
 
 void checkButtons() {
-  if (alarmActive) {
-    if (digitalRead(BUTTON_YES_PIN) == LOW) {
-      alarmActive = false;
-      confirmationSent = true;
-      lcd.clear(); lcd.print("   CONFIRMED!   ");
-      delay(1000);
+    // 1. Handle Alarm Buttons (High Priority)
+    if (activeAlarmSlot != -1) {
+        if (digitalRead(BUTTON_YES_PIN) == LOW) resolveAlarm(true);
+        else if (digitalRead(BUTTON_NO_PIN) == LOW) resolveAlarm(false);
+        return;
     }
-    if (digitalRead(BUTTON_NO_PIN) == LOW) {
-      alarmActive = false;
-      confirmationSent = false;
-      lcd.clear(); lcd.print("    SKIPPED     ");
-      delay(1000);
-    }
-  }
-}
 
-void updateSensorLock() {
-  if (lockedSensorID > 0) {
-    bool stillActive = !digitalRead(SENSOR_PINS[lockedSensorID - 1]);
-    if (!stillActive) {
-      lockedSensorID = 0;
-    }
-  } else {
-    for (int i = 0; i < 4; i++) {
-      if (!digitalRead(SENSOR_PINS[i])) {
-        lockedSensorID = i + 1;
-        break;
-      }
-    }
-  }
-}
+    // 2. Handle "Did you take a pill?" Confirmation
+    if (confirmationMode) {
+        unsigned long elapsed = millis() - confirmationStartTime;
 
-void updateLEDs() {
-  for(int i=0; i<4; i++) {
-    if (lockedSensorID == (i + 1)) {
-       digitalWrite(LED_PINS[i], HIGH);
-    } else {
-       digitalWrite(LED_PINS[i], LOW);
-    }
-  }
-}
-
-void displayStatus() {
-  if (deviceConnected && (millis() - bleConnectTime < 3000)) {
-    lcd.setCursor(0, 0); lcd.print("Device          ");
-    lcd.setCursor(0, 1); lcd.print("Connected!      ");
-    return;
-  }
-
-  if (alarmActive) {
-    lcd.setCursor(0, 0); lcd.print("Taken Pills?    ");
-    lcd.setCursor(0, 1); lcd.print("NO[<]      [>]YES");
-    return;
-  }
-
-  lcd.setCursor(0, 0);
-  if (lockedSensorID == 0) {
-    lcd.print("Ready...        ");
-  } else {
-    lcd.setCursor(0,0);
-    lcd.print("Taking Slot ");
-    lcd.print(lockedSensorID);
-    lcd.print("   ");
-  }
-
-  lcd.setCursor(0, 1);
-  if (shouldConnect) {
-     lcd.print("Connecting...   ");
-  } else {
-     lcd.print(wifiConnected ? "WiFi: ON        " : "WiFi: OFF       ");
-  }
-}
-
-void sendDataToServer() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  bool s1 = (lockedSensorID == 1);
-  bool s2 = (lockedSensorID == 2);
-  bool s3 = (lockedSensorID == 3);
-  bool s4 = (lockedSensorID == 4);
-
-  String gpsData = "0.0,0.0";
-  if (gps.location.isValid()) {
-    gpsData = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6);
-  }
-
-  String jsonPayload = "{";
-  jsonPayload += "\"sensor1\": " + String(s1 ? "true" : "false") + ",";
-  jsonPayload += "\"sensor2\": " + String(s2 ? "true" : "false") + ",";
-  jsonPayload += "\"sensor3\": " + String(s3 ? "true" : "false") + ",";
-  jsonPayload += "\"sensor4\": " + String(s4 ? "true" : "false") + ",";
-  jsonPayload += "\"gpsCoordinates\": \"" + gpsData + "\",";
-  jsonPayload += "\"confirmation\": " + String(confirmationSent ? "true" : "false");
-  jsonPayload += "}";
-
-  confirmationSent = false;
-
-  HTTPClient http;
-  http.begin(SERVER_URL);
-  http.addHeader("Content-Type", "application/json");
-
-  int httpCode = http.POST(jsonPayload);
-
-  if(httpCode > 0) {
-      String response = http.getString();
-      if ((response.indexOf("\"alarm\":true") > 0 || response.indexOf("\"alarm\": true") > 0)) {
-        if (!alarmActive) {
-           alarmActive = true;
+        // CHECK TIMEOUT (30 Seconds)
+        if (elapsed > 30000) {
+            Serial.println("Timeout: Auto-assuming pill taken.");
+            completeTransaction(true); // Default to YES
+            return;
         }
-      }
+
+        // CHECK YES BUTTON
+        if (digitalRead(BUTTON_YES_PIN) == LOW) {
+            delay(200); // Debounce
+            completeTransaction(true);
+        }
+        // CHECK NO BUTTON
+        else if (digitalRead(BUTTON_NO_PIN) == LOW) {
+             delay(200); // Debounce
+             completeTransaction(false);
+        }
+    }
+}
+
+void completeTransaction(bool taken) {
+    lcd.clear();
+    if (taken) {
+        lcd.print("  Recorded: YES ");
+        Serial.println("User confirmed pill taken from Slot " + String(pendingSlotID));
+
+        // TODO: DECREMENT PILL COUNT LOGIC HERE
+        // 1. Send specific API call to backend: /api/pills/decrement?slot=pendingSlotID
+        // 2. OR Update local struct: slots[pendingSlotID-1].pillCount--;
+    } else {
+        lcd.print("  Recorded: NO  ");
+        Serial.println("User said NO (just checking box).");
+    }
+
+    delay(2000); // Show result for 2 seconds
+
+    // Reset State
+    confirmationMode = false;
+    pendingSlotID = 0;
+    lcd.clear(); // Clear so updateDisplay() can redraw home screen
+}
+
+void resolveAlarm(bool taken){
+  if(activeAlarmSlot==-1) return;
+
+  // Stop Buzzers
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(LED_PINS[activeAlarmSlot], LOW);
+
+  lcd.clear();
+  lcd.print(taken?"   CONFIRMED!   ":"    SKIPPED     ");
+
+  // Notify BLE
+  if(taken && deviceConnected){
+    pNotifyChar->setValue("RESULT:TAKEN");
+    pNotifyChar->notify();
   }
-  http.end();
+
+  // Immediate Cloud Update (Fast response)
+  sendToSpringboot();
+
+  activeAlarmSlot=-1;
+  delay(1500); // Short freeze for UI feedback
+}
+
+void updateSensors() {
+  // If we are already asking a question, don't re-trigger
+  if (confirmationMode) return;
+
+  lockedSensorID = 0;
+  for (int i = 0; i < 4; i++) {
+    // Check if sensor is blocked (LOW)
+    if (digitalRead(SENSOR_PINS[i]) == LOW) {
+      lockedSensorID = i + 1;
+
+      // Safety: If an alarm was ringing for this slot, silence it immediately
+      if (activeAlarmSlot == i) {
+          digitalWrite(BUZZER_PIN, LOW);
+          // Note: We don't ask "Did you take it?" if it was an ALARM.
+          // The alarm logic handles that separately in resolveAlarm().
+      }
+      // If NO alarm is active, this is a random pill access. Ask the question.
+      else if (activeAlarmSlot == -1) {
+          startConfirmation(i + 1);
+      }
+    }
+  }
+}
+
+void startConfirmation(int slotID) {
+    confirmationMode = true;
+    pendingSlotID = slotID;
+    confirmationStartTime = millis();
+
+    lcd.clear();
+    lcd.setCursor(0, 0); lcd.print("Slot " + String(slotID) + " Opened!");
+    lcd.setCursor(0, 1); lcd.print("Taken? (Yes/No)");
+    Serial.println("Confirmation Mode Started for Slot " + String(slotID));
+}
+
+void updateDisplay() {
+    // If asking a question, FREEZE the display (don't overwrite it)
+    if (confirmationMode) return;
+
+    // Standard Display Logic
+    static bool lastAlarmState = false;
+    if (lastAlarmState != (activeAlarmSlot != -1)) {
+        lcd.clear();
+        lastAlarmState = (activeAlarmSlot != -1);
+    }
+
+    if (activeAlarmSlot != -1) {
+        lcd.setCursor(0, 0); lcd.print("! ALARM ACTIVE !");
+        lcd.setCursor(0, 1); lcd.print(" CONFIRM? (Y/N) ");
+        return;
+    }
+
+    // Normal Home Screen
+    lcd.setCursor(0, 0);
+    lcd.print("MedBox Pro      ");
+
+    lcd.setCursor(0, 1);
+    // 1. Check Wi-Fi First
+    if (WiFi.status() != WL_CONNECTED) {
+        lcd.print("No WiFi Connect ");
+        return;
+    }
+
+    // 2. Check Time Second
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo, 500)) {
+        lcd.printf("%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+        lcd.print(" WiFi:OK ");
+    } else {
+        lcd.print("NTP Error/Sync..");
+    }
 }
