@@ -20,6 +20,7 @@
 #define BUZZER_PIN     18
 #define GPS_RX_PIN     16
 #define GPS_TX_PIN     17
+#define MAX_ALARMS 24
 
 const int SENSOR_PINS[4] = {34, 35, 13, 23};
 const int LED_PINS[4]    = {32, 15, 25, 19};
@@ -39,6 +40,8 @@ HardwareSerial gpsSerial(1); // Use UART1
 bool confirmationMode = false;
 unsigned long confirmationStartTime = 0;
 int pendingSlotID = 0;
+unsigned long lastBeepTime = 0;
+bool buzzerState = false;
 
 String savedSSID = "";
 String savedPass = "";
@@ -53,7 +56,7 @@ const int   daylightOffset_sec = 0;
 
 // Unified Alarm Structure (Single Source of Truth)
 struct Compartment {
-  String alarms[4]; // Stores "HH:MM"
+  String alarms[MAX_ALARMS]; // Stores "HH:MM"
   int alarmCount = 0;
 };
 Compartment slots[4];
@@ -106,7 +109,7 @@ void parseSchedule(String payload) {
 
         int tStart = 0;
         int count = 0;
-        while (tStart < times.length() && count < 4) {
+        while (tStart < times.length() && count < MAX_ALARMS) {
           int tEnd = times.indexOf(',', tStart);
           if (tEnd == -1) tEnd = times.length();
 
@@ -302,6 +305,7 @@ void setup() {
     lcd.setCursor(0, 1); lcd.print("WiFi Failed!");
   }
   Serial.println("--------------------------------\n");
+
 }
 
 // ================= DEBUG LOOP =================
@@ -323,6 +327,17 @@ void loop(){
     }
   }
 
+ // Inside loop()
+  if (activeAlarmSlot != -1 && !confirmationMode) { // Added !confirmationMode
+      if (millis() - lastBeepTime > 500) {
+          buzzerState = !buzzerState;
+          digitalWrite(BUZZER_PIN, buzzerState ? HIGH : LOW);
+          lastBeepTime = millis();
+      }
+  } else {
+      digitalWrite(BUZZER_PIN, LOW);
+  }
+
   checkLocalSchedule();
   updateSensors();
   checkButtons();
@@ -342,10 +357,14 @@ void checkLocalSchedule(){
     char timeStr[6];
     sprintf(timeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
 
+    // --- DEBUG PRINT (Add this to see the clock ticking) ---
+    Serial.println("Current Time: " + String(timeStr));
+
     for(int s=0; s<4; s++) {
       for(int a=0; a < slots[s].alarmCount; a++) {
         // Simple String comparison
         if(slots[s].alarms[a].equals(timeStr) && activeAlarmSlot == -1) {
+             Serial.println("!!! MATCH FOUND !!! Triggering Alarm..."); // <--- Debug
              triggerAlarm(s);
              lastTriggeredMinute = timeinfo.tm_min; // Lock this minute
         }
@@ -356,7 +375,6 @@ void checkLocalSchedule(){
 
 void triggerAlarm(int slotIdx){
   activeAlarmSlot = slotIdx;
-  digitalWrite(BUZZER_PIN, HIGH);
   digitalWrite(LED_PINS[slotIdx], HIGH);
 
   if(deviceConnected){
@@ -368,34 +386,39 @@ void triggerAlarm(int slotIdx){
 }
 
 void checkButtons() {
-    // 1. Handle Alarm Buttons (High Priority)
-    if (activeAlarmSlot != -1) {
-        if (digitalRead(BUTTON_YES_PIN) == LOW) resolveAlarm(true);
-        else if (digitalRead(BUTTON_NO_PIN) == LOW) resolveAlarm(false);
-        return;
-    }
-
-    // 2. Handle "Did you take a pill?" Confirmation
+    // Priority 1: Confirmation Question (Either from Alarm or Random Access)
     if (confirmationMode) {
         unsigned long elapsed = millis() - confirmationStartTime;
-
-        // CHECK TIMEOUT (30 Seconds)
         if (elapsed > 30000) {
-            Serial.println("Timeout: Auto-assuming pill taken.");
-            completeTransaction(true); // Default to YES
+            if (activeAlarmSlot != -1) resolveAlarm(true);
+            else completeTransaction(true);
             return;
         }
 
-        // CHECK YES BUTTON
         if (digitalRead(BUTTON_YES_PIN) == LOW) {
-            delay(200); // Debounce
-            completeTransaction(true);
+            delay(250); // Hard debounce to prevent double-trigger
+            if (activeAlarmSlot != -1) resolveAlarm(true);
+            else completeTransaction(true);
         }
-        // CHECK NO BUTTON
         else if (digitalRead(BUTTON_NO_PIN) == LOW) {
-             delay(200); // Debounce
-             completeTransaction(false);
+            delay(250);
+            if (activeAlarmSlot != -1) resolveAlarm(false);
+            else completeTransaction(false);
         }
+        if (activeAlarmSlot != -1) {
+          // If we want the buzzer to stop after, say, 5 minutes (300,000 ms)
+          // you would need to track when the alarm started.
+
+          if (digitalRead(BUTTON_YES_PIN) == LOW) resolveAlarm(true);
+          else if (digitalRead(BUTTON_NO_PIN) == LOW) resolveAlarm(false);
+      }
+        return; // EXIT HERE so we don't process "Alarm" buttons separately
+    }
+
+    // Priority 2: Standalone Alarm (Ringing but sensor NOT yet touched)
+    if (activeAlarmSlot != -1) {
+        if (digitalRead(BUTTON_YES_PIN) == LOW) resolveAlarm(true);
+        else if (digitalRead(BUTTON_NO_PIN) == LOW) resolveAlarm(false);
     }
 }
 
@@ -405,9 +428,25 @@ void completeTransaction(bool taken) {
         lcd.print("  Recorded: YES ");
         Serial.println("User confirmed pill taken from Slot " + String(pendingSlotID));
 
-        // TODO: DECREMENT PILL COUNT LOGIC HERE
-        // 1. Send specific API call to backend: /api/pills/decrement?slot=pendingSlotID
-        // 2. OR Update local struct: slots[pendingSlotID-1].pillCount--;
+        // --- NEW CODE START ---
+        if (WiFi.status() == WL_CONNECTED) {
+            HTTPClient http;
+            // MAKE SURE THIS IP MATCHES YOUR SERVER_URL
+            String url = "http://172.20.10.5:8080/api/schedule/decrement/" + String(pendingSlotID);
+
+            http.begin(url);
+            // We send an empty POST request because the ID is in the URL
+            int httpCode = http.POST("");
+
+            if (httpCode > 0) {
+                Serial.println("Decrement Request Sent. Code: " + String(httpCode));
+            } else {
+                Serial.println("Decrement Failed. Error: " + String(httpCode));
+            }
+            http.end();
+        }
+        // --- NEW CODE END ---
+
     } else {
         lcd.print("  Recorded: NO  ");
         Serial.println("User said NO (just checking box).");
@@ -418,7 +457,7 @@ void completeTransaction(bool taken) {
     // Reset State
     confirmationMode = false;
     pendingSlotID = 0;
-    lcd.clear(); // Clear so updateDisplay() can redraw home screen
+    lcd.clear();
 }
 
 void resolveAlarm(bool taken){
@@ -426,6 +465,7 @@ void resolveAlarm(bool taken){
 
   // Stop Buzzers
   digitalWrite(BUZZER_PIN, LOW);
+  buzzerState = false;
   digitalWrite(LED_PINS[activeAlarmSlot], LOW);
 
   lcd.clear();
@@ -445,29 +485,24 @@ void resolveAlarm(bool taken){
 }
 
 void updateSensors() {
-  // If we are already asking a question, don't re-trigger
-  if (confirmationMode) return;
+    // If a question is already being asked, LOCK the sensors
+    if (confirmationMode) return;
 
-  lockedSensorID = 0;
-  for (int i = 0; i < 4; i++) {
-    // Check if sensor is blocked (LOW)
-    if (digitalRead(SENSOR_PINS[i]) == LOW) {
-      lockedSensorID = i + 1;
-
-      // Safety: If an alarm was ringing for this slot, silence it immediately
-      if (activeAlarmSlot == i) {
-          digitalWrite(BUZZER_PIN, LOW);
-          // Note: We don't ask "Did you take it?" if it was an ALARM.
-          // The alarm logic handles that separately in resolveAlarm().
-      }
-      // If NO alarm is active, this is a random pill access. Ask the question.
-      else if (activeAlarmSlot == -1) {
-          startConfirmation(i + 1);
-      }
+    for (int i = 0; i < 4; i++) {
+        if (digitalRead(SENSOR_PINS[i]) == LOW) {
+            // Found a trigger!
+            if (activeAlarmSlot == i) {
+                // It's the right pill for the alarm
+                startConfirmation(i + 1);
+            }
+            else if (activeAlarmSlot == -1) {
+                // No alarm, just random access
+                startConfirmation(i + 1);
+            }
+            break; // Stop looking at other sensors this frame
+        }
     }
-  }
 }
-
 void startConfirmation(int slotID) {
     confirmationMode = true;
     pendingSlotID = slotID;
