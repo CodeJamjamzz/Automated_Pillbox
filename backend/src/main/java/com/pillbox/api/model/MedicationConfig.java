@@ -15,24 +15,26 @@ public class MedicationConfig {
     private Integer slotId; // 1, 2, 3, or 4 (Manually assigned)
 
     private String pillName;
-    private String takerName;
+    private String illnessName;
     private int pillAmount;
+
+    private String dosage;
+    private LocalTime startDate;
+    private String colorCode;
 
     private LocalTime startTime;
     private int intervalHours; // e.g., 4, 6, 8, 12, 24
     private int durationDays;  // Optional
 
-    // We store the calculated times as a simple string for the ESP32
-    // Format: "08:00,12:00,16:00"
+
+
     private String calculatedTimes;
 
     public Integer getSlotId() {
         return slotId;
     }
 
-    public void setSlotId(Integer slotId) {
-        this.slotId = slotId;
-    }
+    public void setSlotId(Integer slotId) { this.slotId = slotId; }
 
     public String getPillName() {
         return pillName;
@@ -42,12 +44,12 @@ public class MedicationConfig {
         this.pillName = pillName;
     }
 
-    public String getTakerName() {
-        return takerName;
+    public String getIllnessName() {
+        return illnessName;
     }
 
-    public void setTakerName(String takerName) {
-        this.takerName = takerName;
+    public void setIllnessName(String illnessName) {
+        this.illnessName = illnessName;
     }
 
     public int getPillAmount() {
@@ -89,4 +91,16 @@ public class MedicationConfig {
     public void setCalculatedTimes(String calculatedTimes) {
         this.calculatedTimes = calculatedTimes;
     }
+
+    public java.lang.String getDosage() { return dosage; }
+
+    public void setDosage(java.lang.String dosage) { this.dosage = dosage;}
+
+    public LocalTime getStartDate() {return startDate;}
+
+    public void setStartDate(LocalTime startDate) {this.startDate = startDate;}
+
+    public java.lang.String getColorCode() {return colorCode;}
+
+    public void setColorCode(java.lang.String colorCode) { this.colorCode = colorCode; }
 }

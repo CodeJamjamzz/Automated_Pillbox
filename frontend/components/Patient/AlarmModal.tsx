@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, Animated, Easing } from 'react-native';
 import { Check, Volume2, VolumeX, Pill, AlertTriangle, Clock } from 'lucide-react-native';
-import { Partition } from '../../types'; // Adjust path to your types if needed
+import { Partition } from '../../types';
 
 interface AlarmModalProps {
   partition: Partition;
@@ -18,7 +18,7 @@ enum AlarmStep {
 const AlarmModal: React.FC<AlarmModalProps> = ({ partition, onConfirm, onClose }) => {
   const [step, setStep] = useState<AlarmStep>(AlarmStep.RINGING);
   const [manualTurnOff, setManualTurnOff] = useState(false);
-  
+
   const pingAnim = useRef(new Animated.Value(0)).current;
   const timeoutRef = useRef<any>(null);
 
@@ -41,12 +41,12 @@ const AlarmModal: React.FC<AlarmModalProps> = ({ partition, onConfirm, onClose }
         ])
       ).start();
 
-      // Auto-stop after 60 seconds
+      // Auto-stop ringing after 60 seconds and move to confirmation check
       timeoutRef.current = setTimeout(() => {
         handleAutoTimeout();
       }, 60000);
     }
-    
+
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
@@ -65,9 +65,9 @@ const AlarmModal: React.FC<AlarmModalProps> = ({ partition, onConfirm, onClose }
 
   const handleConfirmIntake = () => {
     setStep(AlarmStep.SUCCESS);
-    // Wait 1.5s to show success state before closing
+    // Wait 1.5s to show success state before closing and updating Dashboard
     setTimeout(() => {
-        onConfirm(); // This triggers the logic in Dashboard
+        onConfirm();
     }, 1500);
   };
 
@@ -100,7 +100,7 @@ const AlarmModal: React.FC<AlarmModalProps> = ({ partition, onConfirm, onClose }
               <View style={styles.slotBadge}>
                  <Text style={styles.slotBadgeText}>SLOT {partition.id} • {partition.medicineName}</Text>
               </View>
-              
+
               <View style={styles.instructions}>
                 <Text style={styles.instructionText}>
                   Your MedBox device is ringing. Deactivate the physical buzzer to proceed.
@@ -123,22 +123,22 @@ const AlarmModal: React.FC<AlarmModalProps> = ({ partition, onConfirm, onClose }
               <View style={[styles.statusIcon, manualTurnOff ? styles.bgGreen : styles.bgAmber]}>
                 {manualTurnOff ? <Pill size={40} stroke="#16a34a" /> : <AlertTriangle size={40} stroke="#d97706" />}
               </View>
-              
+
               <Text style={styles.confirmTitle}>
                 {manualTurnOff ? "Alarm Deactivated." : "Buzzer Timed Out."}{"\n"}
                 <Text style={manualTurnOff ? styles.textGreen : styles.textAmber}>Did you take your meds?</Text>
               </Text>
-              
+
               <View style={styles.clarificationBox}>
                 <Text style={styles.clarificationText}>
-                  {manualTurnOff 
+                  {manualTurnOff
                     ? `Thank you for turning off the alarm. Please confirm you took your ${partition.medicineName}.`
                     : `The alarm stopped after 1 minute. We need to verify: did you take your ${partition.medicineName}?`}
                 </Text>
               </View>
 
-              <TouchableOpacity 
-                onPress={handleConfirmIntake} 
+              <TouchableOpacity
+                onPress={handleConfirmIntake}
                 style={[styles.confirmButton, manualTurnOff ? styles.bgGreenSolid : styles.bgAmberSolid]}
               >
                 <Check size={28} stroke="#fff" />

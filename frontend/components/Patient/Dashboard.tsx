@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity} from 'react-native';
-import { Battery, Bluetooth, Smartphone, Box, X } from 'lucide-react-native';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity } from 'react-native';
+import { Bluetooth, Smartphone, Box, X } from 'lucide-react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -8,12 +8,11 @@ import { Audio } from 'expo-av';
 import { Base64 } from 'js-base64';
 import { useRoute } from '@react-navigation/native';
 import { Device } from 'react-native-ble-plx';
-import { bleManager } from '@/app/utils/BleService'; //
+import { bleManager } from '@/app/utils/BleService';
 
 // --- SUB COMPONENTS ---
 import DeviceLayout from '../DeviceLayout';
 import DailySchedule from '../DailySchedule';
-// import LocationTracker from '../LocationTracker';
 
 // --- IMPORTS ---
 import { PatientRecord, Partition } from '../../types';
@@ -21,7 +20,7 @@ import PartitionConfig from './PartitionConfig';
 import AlarmModal from './AlarmModal';
 import { registerForNotifications } from '@/app/utils/NotificationService';
 
-// --- INITIAL STATE & CONSTANTS ---
+// --- INITIAL STATE ---
 export const INITIAL_PATIENT_DATA: PatientRecord = {
   id: 'patient-1',
   name: 'User',
@@ -59,6 +58,10 @@ interface PatientDashboardProps {
   onUpdate?: (patient: PatientRecord) => void;
 }
 
+// ⚠️ IMPORTANT: Replace with your actual Laptop/Server IP
+const BACKEND_URL = "http://192.168.1.5:8080/api/pillbox/status";
+const WINDOW_MINUTES = 5;
+
 const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   const [patient, setPatient] = useState<PatientRecord>(INITIAL_PATIENT_DATA);
   const [configPartition, setConfigPartition] = useState<Partition | null>(null);
@@ -66,6 +69,10 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   // --- ALARM & TIME STATE ---
   const [activeAlarmPartition, setActiveAlarmPartition] = useState<Partition | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // --- REFS ---
+  // Tracks the last dose ID that triggered the modal so we don't popup twice for the same pill
+  const lastTriggeredDose = useRef<string | null>(null);
 
   // --- MAP / TRACKING STATE ---
   const [showFullMap, setShowFullMap] = useState(false);
@@ -75,34 +82,24 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   const route = useRoute();
   const isNewDevice = patient.partitions.every(p => !p.label || p.label === 'Unassigned');
 
-  // --- 1. GET DEVICE FROM NAVIGATION PARAMS ---
-  // This object might be "hollow" (missing methods)
+  // --- BLE DEVICE HANDLING ---
   const { connectedDevice } = (route.params as { connectedDevice?: Device }) || {};
-
-  // --- 2. CREATE THE STATE VARIABLE ---
-  // This 'device' variable is the one you will use everywhere else
   const [device, setDevice] = useState<Device | null>(connectedDevice || null);
 
-  // --- 3. REHYDRATE THE DEVICE (CRITICAL) ---
+  // --- 1. REHYDRATE BLE DEVICE ---
   useEffect(() => {
     const fetchLiveDevice = async () => {
       if (connectedDevice?.id) {
         try {
-          // A. Ask the BLE Manager for currently connected devices
-          // (You must provide the Service UUID to filter)
           const devices = await bleManager.connectedDevices(["6E400001-B5A3-F393-E0A9-E50E24DCCA9E"]);
-
-          // B. Find the one that matches our ID
           const liveDevice = devices.find(d => d.id === connectedDevice.id);
 
           if (liveDevice) {
-            // C. Refresh services to ensure it's ready to talk
             await liveDevice.discoverAllServicesAndCharacteristics();
-            setDevice(liveDevice); // Update state with the fully functional object
+            setDevice(liveDevice);
             console.log("Device rehydrated successfully:", liveDevice.id);
           } else {
-            console.log("Device not found in connected list. Attempting reconnect...");
-            // D. Fallback: Force a reconnect if it wasn't found
+            console.log("Device not found. Reconnecting...");
             const freshDevice = await bleManager.connectToDevice(connectedDevice.id);
             await freshDevice.discoverAllServicesAndCharacteristics();
             setDevice(freshDevice);
@@ -112,43 +109,33 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
         }
       }
     };
-
     fetchLiveDevice();
   }, [connectedDevice]);
+
   const syncScheduleToHardware = async (updatedPartition: Partition) => {
     if (!device) return;
-
     try {
-      // 1. Format Payload: "SlotID|HH:MM,HH:MM"
-      // Hardware uses 0-3 index, App uses 1-4. So we do (id - 1)
-      let payload = `${updatedPartition.id - 1}|`;
-
+      let payload = `${updatedPartition.id - 1}|`; // Hardware uses 0-3
       const timeStrings = updatedPartition.schedule.map(isoStr => {
         const d = new Date(isoStr);
-        // Format to "HH:MM" (24-hour format)
         const hh = d.getHours().toString().padStart(2, '0');
         const mm = d.getMinutes().toString().padStart(2, '0');
         return `${hh}:${mm}`;
       });
-
       payload += timeStrings.join(',');
 
       console.log("Syncing to Hardware:", payload);
-
-      // 2. Write to the new Schedule UUID
-      // Note: We use the raw string here, but if your ESP32 expects Base64, wrap it: Base64.encode(payload)
       await device.writeCharacteristicWithResponseForService(
-          "6E400001-B5A3-F393-E0A9-E50E24DCCA9E", // Service
-          "6E400003-B5A3-F393-E0A9-E50E24DCCA9E", // Schedule UUID
-          Base64.encode(payload) // Encoding to be safe
+          "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
+          "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
+          Base64.encode(payload)
       );
-
     } catch (e) {
       console.error("Sync Failed:", e);
-      // Optional: Alert the user
     }
   };
-  // --- SCHEDULE LOGIC ---
+
+  // --- SCHEDULE CALCULATIONS ---
   const [takenDoses, setTakenDoses] = useState<Set<string>>(new Set());
 
   const todayDoses = useMemo(() => {
@@ -170,18 +157,65 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
     return doses.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
   }, [patient.partitions, takenDoses]);
 
-  // --- Handle Dose Action (Take/Undo) & Update Inventory ---
+  // --- 2. SENSOR POLLING (SMART TRIGGER) ---
+  useEffect(() => {
+    const pollSensors = async () => {
+      try {
+        const response = await fetch(BACKEND_URL);
+        const sensorData = await response.json();
+        const now = new Date();
+
+        todayDoses.forEach(dose => {
+          const doseTime = new Date(dose.time);
+          const diffInMinutes = (now.getTime() - doseTime.getTime()) / 60000;
+
+          // TRIGGER RULES:
+          // 1. Within 5 mins after scheduled time
+          // 2. Not already taken
+          // 3. Haven't already triggered the modal for this specific dose
+          if (
+            diffInMinutes >= 0 &&
+            diffInMinutes <= WINDOW_MINUTES &&
+            dose.status === 'pending' &&
+            lastTriggeredDose.current !== dose.id
+          ) {
+            // Check specific sensor (sensor1, sensor2...)
+            const sensorTriggered = sensorData[`sensor${dose.partitionId}`] === 1;
+
+            if (sensorTriggered) {
+              console.log(`Sensor ${dose.partitionId} triggered! Launching AlarmModal.`);
+
+              const partitionToAlarm = patient.partitions.find(p => p.id === dose.partitionId);
+              if (partitionToAlarm) {
+                lastTriggeredDose.current = dose.id; // Mark as handled
+                setActiveAlarmPartition(partitionToAlarm);
+              }
+            }
+          }
+        });
+      } catch (err) {
+        // Comment out error logging to avoid spam if server is offline
+        // console.error("Sensor polling error:", err);
+      }
+    };
+
+    const interval = setInterval(pollSensors, 3000); // Poll every 3 seconds
+    return () => clearInterval(interval);
+  }, [todayDoses, patient.partitions]);
+
+
+  // --- 3. UPDATE INVENTORY & STATUS ---
   const handleDoseAction = (dose: any) => {
     if (takenDoses.has(dose.id)) return;
 
-    // 1. Update Visual Status
+    // A. Update Visual Status
     setTakenDoses(prev => {
       const next = new Set(prev);
       next.add(dose.id);
       return next;
     });
 
-    // 2. Update Inventory (Pill Count)
+    // B. Update Pill Count
     const updatedPartitions = patient.partitions.map(p => {
       if (p.id === dose.partitionId) {
         return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
@@ -197,7 +231,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
     if (props.onUpdate) props.onUpdate(updatedPatient);
   };
 
-  // --- 1. HEARTBEAT: CHECK TIME & UPDATE CLOCK ---
+  // --- 4. CLOCK & SCHEDULED ALARM CHECK ---
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -212,12 +246,15 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
             const d = new Date(timeStr);
             const doseId = `${p.id}-${index}`;
 
+            // Trigger standard alarm if time matches (regardless of sensor)
             if (
                 d.getHours() === currentHour &&
                 d.getMinutes() === currentMinute &&
                 !takenDoses.has(doseId) &&
-                activeAlarmPartition?.id !== p.id
+                activeAlarmPartition?.id !== p.id &&
+                lastTriggeredDose.current !== doseId
             ) {
+              lastTriggeredDose.current = doseId;
               setActiveAlarmPartition(p);
             }
           });
@@ -229,7 +266,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   }, [patient, takenDoses, activeAlarmPartition]);
 
 
-  // --- 2. ALARM LOGIC: TIMEOUT & SOUND ---
+  // --- 5. ALARM SOUND & TIMEOUT ---
   useEffect(() => {
     let timeoutId: any;
     let soundObject: Audio.Sound | null = null;
@@ -248,7 +285,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
     };
 
     if (activeAlarmPartition) {
-      timeoutId = setTimeout(() => setActiveAlarmPartition(null), 60000);
+      timeoutId = setTimeout(() => setActiveAlarmPartition(null), 60000); // 60s timeout
       playSound();
     }
 
@@ -262,26 +299,20 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   }, [activeAlarmPartition]);
 
 
-  // --- 3. HANDLE ALARM CONFIRM ---
+  // --- 6. HANDLE ALARM CONFIRMATION ---
   const handleAlarmConfirm = () => {
     if (!activeAlarmPartition) return;
+
     const doseToMark = todayDoses.find(d =>
-        d.partitionId === activeAlarmPartition.id && d.status === 'pending'
+      d.partitionId === activeAlarmPartition.id && d.status === 'pending'
     );
+
     if (doseToMark) {
       handleDoseAction(doseToMark);
-    } else {
-      const updatedPartitions = patient.partitions.map(p => {
-        if (p.id === activeAlarmPartition.id) {
-          return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
-        }
-        return p;
-      });
-      handlePatientUpdate({ ...patient, partitions: updatedPartitions });
     }
+
     setActiveAlarmPartition(null);
   };
-
 
   // --- LOCATION & NOTIFICATION ---
   const requestLocationPermission = async () => {
@@ -328,7 +359,6 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   return (
       <View style={{ flex: 1 }}>
         <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-
           {/* HEADER */}
           <View style={styles.header}>
             <View>
@@ -345,13 +375,13 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
             </View>
           </View>
 
-          {/* COMPONENT 1: DEVICE LAYOUT (Grid) */}
+          {/* GRID */}
           <DeviceLayout
               partitions={patient.partitions}
               onPartitionSelect={setConfigPartition}
           />
 
-          {/* COMPONENT 2: DAILY SCHEDULE (Timeline) */}
+          {/* SCHEDULE */}
           <DailySchedule
               todayDoses={todayDoses}
               currentTime={currentTime}
@@ -359,16 +389,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
               isNewDevice={isNewDevice}
           />
 
-          {/* COMPONENT 3: LOCATION TRACKER (Map Widget) */}
-          {/*<LocationTracker*/}
-          {/*    permissionStatus={permissionStatus}*/}
-          {/*    userLocation={userLocation}*/}
-          {/*    kitLocation={kitLocation}*/}
-          {/*    onRequestPermission={requestLocationPermission}*/}
-          {/*    onShowFullMap={() => setShowFullMap(true)}*/}
-          {/*/>*/}
-
-          {/* MODAL: FULL SCREEN MAP (Kept here to overlay everything) */}
+          {/* MAP MODAL */}
           <Modal visible={showFullMap} animationType="slide">
             <View style={styles.fullMapContainer}>
               {userLocation ? (
@@ -381,12 +402,11 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                   >
                     {kitLocation && (
                         <>
-                          <Marker coordinate={kitLocation} title="My MedBox" description="Device Location" pinColor="red" />
+                          <Marker coordinate={kitLocation} title="My MedBox" pinColor="red" />
                           <Polyline
                               coordinates={[userLocation, kitLocation]}
                               strokeColor="#2563eb"
                               strokeWidth={2}
-                              lineDashPattern={[5, 5]}
                           />
                         </>
                     )}
@@ -395,17 +415,6 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                   <MapView style={styles.fullMap} initialRegion={FALLBACK_REGION} />
               )}
 
-              <View style={styles.legendContainer}>
-                <View style={styles.legendItem}>
-                  <Smartphone size={16} stroke="#2563eb" />
-                  <Text style={styles.legendText}>You</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <Box size={16} stroke="#ef4444" />
-                  <Text style={styles.legendText}>MedBox</Text>
-                </View>
-              </View>
-
               <TouchableOpacity onPress={() => setShowFullMap(false)} style={styles.closeMapButton}>
                 <X size={24} stroke="#fff" />
                 <Text style={styles.closeMapText}>CLOSE MAP</Text>
@@ -413,23 +422,18 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
             </View>
           </Modal>
 
-          {/* MODAL: CONFIG PARTITION */}
+          {/* CONFIG PARTITION MODAL */}
           {configPartition && (
               <Modal animationType="slide" visible={true} onRequestClose={() => setConfigPartition(null)}>
                 <PartitionConfig
                     partition={configPartition}
                     onSave={(data) => {
                       const updatedP = { ...configPartition, ...data as Partition };
-
-                      // 1. Update Local App State
                       handlePatientUpdate({
                         ...patient,
                         partitions: patient.partitions.map(p => p.id === configPartition.id ? updatedP : p)
                       });
-
-                      // 2. SYNC TO ESP32 IMMEDIATELY
                       syncScheduleToHardware(updatedP);
-
                       setConfigPartition(null);
                     }}
                     onClose={() => setConfigPartition(null)}
@@ -438,7 +442,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
           )}
         </ScrollView>
 
-        {/* MODAL: ALARM */}
+        {/* ALARM MODAL */}
         {activeAlarmPartition && (
             <AlarmModal
                 partition={activeAlarmPartition}
@@ -459,8 +463,6 @@ const styles = StyleSheet.create({
   statusContainer: { flexDirection: 'row', gap: 8 },
   badgeBlue: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0fdfa', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#ccfbf1', gap: 4 },
   badgeTextBlue: { fontSize: 10, fontWeight: '900', color: '#0d9488' },
-  badgeGray: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f5f9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, gap: 4 },
-  badgeTextGray: { fontSize: 10, fontWeight: '900', color: '#475569' },
 
   // Full Map Styles
   fullMapContainer: { flex: 1, backgroundColor: '#000' },
