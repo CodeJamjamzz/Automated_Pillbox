@@ -45,8 +45,8 @@ export const INITIAL_PATIENT_DATA: PatientRecord = {
     selectedDays: [] as number[],
     timesPerDay: 0,
     dosage: '',
-    start_date = new Date().toISOString().split("T")[0],
-    start_time = new Date().toTimeString().slice(0, 5]
+    start_date: new Date().toISOString().split("T")[0],
+    start_time: new Date().toTimeString().slice(0, 5),
   }))
 };
 

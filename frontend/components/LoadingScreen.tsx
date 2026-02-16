@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Dimensions } from 'react-native';
-import LoadingScreen from './components/LoadingScreen';
-import MedicalDashboard from './components/MedicalDashboard';
-import { fetchMedicalTips } from './services/geminiService';
+// 1. Rename the import to avoid conflict with your local component
+import LoadingView from '../components/LoadingScreen';
+import MedicalDashboard from './Patient/Dashboard';
+import { fetchMedicalTips } from '../services/geminiService';
 import { LoadingTip } from './types';
 
 const { width } = Dimensions.get('window');
 
+// 2. Now this local declaration is safe
 const LoadingScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [tips, setTips] = useState<LoadingTip[]>([]);
@@ -27,15 +29,16 @@ const LoadingScreen: React.FC = () => {
   }, []);
 
   return (
-    <View style={styles.container}>
-      {isLoading ? (
-        <LoadingScreen tips={tips} />
-      ) : (
-        <View style={styles.dashboardContainer}>
-          <MedicalDashboard />
-        </View>
-      )}
-    </View>
+      <View style={styles.container}>
+        {isLoading ? (
+            // 3. Use the renamed imported component here
+            <LoadingView tips={tips} />
+        ) : (
+            <View style={styles.dashboardContainer}>
+              <MedicalDashboard />
+            </View>
+        )}
+      </View>
   );
 };
 
