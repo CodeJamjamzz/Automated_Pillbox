@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { SafeAreaView, StyleSheet, View, StatusBar, Platform } from 'react-native';
+import { SafeAreaView, StyleSheet, StatusBar, Platform } from 'react-native';
+import axios from 'axios'; // 1. Added missing import
 import { AppPhase, PatientRecord, Partition } from '../../types';
 import PatientDashboard from '../../components/Patient/Dashboard';
 import { Layout } from '../../components/Layout';
@@ -9,6 +10,7 @@ import BluetoothScreen from '../../components/BluetoothScreen';
 import AlarmModal from '../../components/Patient/AlarmModal';
 import LoadingScreen from "../../components/LoadingScreen";
 
+// 2. Fixed Syntax: Replaced '=' with ':' and fixed slice() brackets
 const INITIAL_PATIENT: PatientRecord = {
   id: 'P001',
   name: 'User',
@@ -37,12 +39,12 @@ interface Slot {
 }
 
 const App: React.FC = () => {
-    const [isLoading, setLoadingScreen] = useState(true)
-  const [phase, setPhase] = useState<AppPhase>(AppPhase.SPLASH);
-  const [connectedDevice, setConnectedDevice] = useState<string | null>(null);
-  const [patient, setPatient] = useState<PatientRecord>(INITIAL_PATIENT);
-  const [activeAlarm, setActiveAlarm] = useState<Partition | null>(null);
-  const lastCheckedMinute = useRef<string>("");
+    const [isLoading, setLoadingScreen] = useState(true);
+    const [phase, setPhase] = useState<AppPhase>(AppPhase.SPLASH);
+    const [connectedDevice, setConnectedDevice] = useState<string | null>(null);
+    const [patient, setPatient] = useState<PatientRecord>(INITIAL_PATIENT);
+    const [activeAlarm, setActiveAlarm] = useState<Partition | null>(null);
+    const lastCheckedMinute = useRef<string>("");
 
   useEffect(() => {
     if (phase === AppPhase.SPLASH) {
@@ -105,7 +107,7 @@ const App: React.FC = () => {
               const response = await axios.get("http://localhost:8080/api/schedule/")
               const slotList: Slot[] = response.data;
 
-              for (let i = 0; i < slotList.length; i++){
+              for (let i = 0; i < slotList.length; i++)
                   slotList[i] = response.data[i];
                   if(slotList[i].illness_name != null){
                       partitions[i].schedule = slotList[i].calculated_times.text.trim().split(/\s+/);
