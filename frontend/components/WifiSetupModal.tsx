@@ -42,7 +42,6 @@ const WifiSetupModal: React.FC<WifiSetupModalProps> = ({ visible, onClose, devic
     const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
     const handleSendCredentials = async () => {
-        // 1. Basic Validation
         if (!device) {
             Alert.alert("Error", "No device connected.");
             return;
@@ -55,56 +54,43 @@ const WifiSetupModal: React.FC<WifiSetupModalProps> = ({ visible, onClose, devic
         setStatus('sending');
 
         try {
-            // 2. CHECK CONNECTION STATUS
+            // Ensure device is connected
             const isConnected = await device.isConnected();
             if (!isConnected) {
-                Alert.alert("Disconnected", "Device connection lost. Please reconnect.");
-                setStatus('idle');
-                return;
+                await device.connect();
             }
 
-            // 3. WARM UP BLUETOOTH (CRITICAL FOR ANDROID)
-            // This forces the phone to re-map the device services
+            // 1. Discover services and WAIT (Crucial for stability)
             await device.discoverAllServicesAndCharacteristics();
+            await delay(500);
 
-            // 4. REQUEST MTU (CRITICAL FOR ANDROID)
-            // Increases packet size so long passwords don't get cut off
             if (Platform.OS === 'android') {
                 await device.requestMTU(512);
-                await delay(200); // Give the OS time to apply the MTU
+                await delay(500);
             }
 
-            // 5. PREPARE PAYLOAD
-            // Format: "SSID:PASSWORD" (Colon separator matches firmware)
+            // 2. Prepare Payload (Matches Firmware "SSID:PASS")
             const payload = `${ssid}:${password}`;
             const base64Data = base64.encode(payload);
 
-            console.log("Writing to:", WIFI_CHAR_UUID);
-            console.log("Payload:", payload);
-
-            // 6. WRITE TO DEVICE
+            // 3. Write to the WiFi Characteristic
+            // Using "WithResponse" ensures the ESP32 acknowledges the data
             await device.writeCharacteristicWithResponseForService(
                 SERVICE_UUID,
                 WIFI_CHAR_UUID,
                 base64Data
             );
 
-            // 7. SUCCESS HANDLING
             setStatus('success');
             setTimeout(() => {
                 setStatus('idle');
-                onSuccess(); // Triggers parent callback (close modal, maybe show toast)
+                onSuccess();
             }, 2000);
 
         } catch (error: any) {
-            console.error("WiFi Setup Error:", error);
+            console.error("WiFi Write Failed:", error);
             setStatus('idle');
-
-            // User-friendly error message
-            Alert.alert(
-                "Setup Failed",
-                "Could not send credentials. Ensure the device is powered on and within range."
-            );
+            Alert.alert("Setup Failed", "Could not send Wi-Fi. Check if ESP32 is still in Pairing Mode.");
         }
     };
 

@@ -15,7 +15,7 @@ const WEEKDAYS = [
   { label: 'Sat', value: 6 },
 ];
 
-interface PartitionConfigProps {cd
+interface PartitionConfigProps {cd: any
   partition: Partition;
   onSave: (data: any) => void;
   onClose: () => void;
@@ -31,7 +31,7 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
     takerName: "User", // Corrected key from 'medicineName' to 'takerName'
     pillAmount: partition.pillCount || 0,
     startTime: "08:00",
-    durationDays: partition.durationDays || 0,
+    durationDays: partition.duration_days || 0,
     dosage: partition.dosage || "",
     startDate: new Date().toISOString().split('T')[0], // Default to today
     intervalHours: 0,
@@ -55,10 +55,10 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
   );
 
   const [tempDuration, setTempDuration] = useState(
-    partition.durationDays ? String(partition.durationDays) : '7'
+    partition.duration_days ? String(partition.duration_days) : '7'
   );
   const [tempUnit, setTempUnit] = useState<'days' | 'weeks'>('days');
-  const [frequencyType, setFrequencyType] = useState<'daily' | 'weekly'>(partition.frequencyType || 'daily');
+  const [frequencyType, setFrequencyType] = useState<'daily' | 'weekly'>('daily');
   const [selectedDays, setSelectedDays] = useState<number[]>(partition.selectedDays || []);
 
   const [scheduleData, setScheduleData] = useState({
@@ -66,7 +66,7 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
     timesPerDay: partition.timesPerDay ? String(partition.timesPerDay) : '1',
     firstDoseTime: partition.schedule && partition.schedule.length > 0 ? new Date(partition.schedule[0]) : new Date(),
     startDate: new Date(),
-    color: partition.colorTheme && partition.colorTheme !== '#cbd5e1' ? partition.colorTheme : COLORS[4],
+    color: partition.color_code && partition.color_code !== 0 ? partition.color_code : COLORS[4],
     isConfigured: isEditMode
   });
 
@@ -100,16 +100,16 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
     );
   };
 
-  const postMedConfig = async (partitionId: number, data: any) => {
-    try {
-        // REPLACE WITH YOUR BACKEND IP
-        const response = await axios.put(`http://localhost:8080/api/schedule/update/${partitionId}`, data);
-        return response.data;
-    } catch (error) {
-        console.error("Hardware Sync Error:", error);
-        throw error;
-    }
-  };
+    const postMedConfig = async (partitionId: number, data: any) => {
+        try {
+            // CHANGED: From localhost to Render URL
+            const response = await axios.put(`https://pillbox-backend.onrender.com/api/schedule/update/${partitionId}`, data);
+            return response.data;
+        } catch (error) {
+            console.error("Hardware Sync Error:", error);
+            throw error;
+        }
+    };
 
   const handleWizardSave = () => {
     if (frequencyType === 'weekly' && selectedDays.length === 0) {
@@ -187,25 +187,25 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
 
   // ... (handleRemove and render methods remain the same as the previous correct code)
 
-//   const handleRemove = () => {
-//     Alert.alert("Remove Assignment", "Are you sure you want to clear this slot?", [
-//       { text: "Cancel", style: "cancel" },
-//       {
-//         text: "Remove",
-//         style: "destructive",
-//         onPress: async () => {
-//           setSaving(true);
-//           const resetData = { slotId: partition.id, pillName: "Unassigned", pillAmount: 0, calculatedTimes: "", dosage: "", durationDays: 0 };
-//           try {
-//             await postMedConfig(partition.id, resetData);
-//             onSave({ ...partition, label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [] });
-//             onClose();
-//           } catch (e) { setError("Failed to reset slot on hardware."); }
-//           setSaving(false);
-//         }
-//       }
-//     ]);
-//   };
+  const handleRemove = () => {
+    Alert.alert("Remove Assignment", "Are you sure you want to clear this slot?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          setSaving(true);
+          const resetData = { slotId: partition.id, pillName: "Unassigned", pillAmount: 0, calculatedTimes: "", dosage: "", durationDays: 0 };
+          try {
+            await postMedConfig(partition.id, resetData);
+            onSave({ ...partition, label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [] });
+            onClose();
+          } catch (e) { setError("Failed to reset slot on hardware."); }
+          setSaving(false);
+        }
+      }
+    ]);
+  };
 
   const renderWizardStep1 = () => (
     <View style={styles.wizContent}>

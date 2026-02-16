@@ -9,7 +9,6 @@ import { Base64 } from 'js-base64';
 import { useRoute } from '@react-navigation/native';
 import { Device } from 'react-native-ble-plx';
 import { bleManager } from '@/app/utils/BleService';
-import { LoadingScreen } from '../LoadingScreen';
 
 // --- SUB COMPONENTS ---
 import DeviceLayout from '../DeviceLayout';
@@ -23,31 +22,42 @@ import AlarmModal from './AlarmModal';
 import { registerForNotifications } from '@/app/utils/NotificationService';
 
 // --- INITIAL STATE & CONSTANTS ---
-export const INITIAL_PATIENT_DATA: PatientRecord = {
-  id: 'patient-1', //walay labot
-  name: 'User',    //walay labot
-  age: 65,         //walay labot
-  riskScore: 0,    //walay labot
-  lastLocation: { lat: 10.3292, lng: 123.9063 },
-  partitions: Array.from({ length: 4 }).map((_, i) => ({
-    id: i + 1,
-    label: 'Unassigned',
-    medicineName: '',
-    pillCount: 0,
-    schedule: [] as string[],
-    isBlinking: false,
-    adherenceRate: 0,
-    history: [] as boolean[],
-    color_code: '#cbd5e1',
-    isShortTerm: false,
-    durationDays: 0,
-    frequencyType: 'daily',
-    selectedDays: [] as number[],
-    timesPerDay: 0,
-    dosage: '',
-    start_date: new Date().toISOString().split("T")[0],
-    start_time: new Date().toTimeString().slice(0, 5)
-  }))
+const INITIAL_PATIENT_DATA: PatientRecord = {
+  id: 'P001',
+  name: 'User',
+  age: 68,
+  partitions: [
+    {
+      id: 1, color_code: 0, dosage: "0", duration_days: 0,
+      start_date: new Date().toISOString().split("T")[0],
+      start_time: new Date().toTimeString().slice(0, 5),
+      label: 'Unassigned', medicineName: '', pillCount: 0,
+      schedule: [], isBlinking: false, adherenceRate: 0, history: []
+    },
+    {
+      id: 2, color_code: 0, dosage: "0", duration_days: 0,
+      start_date: new Date().toISOString().split("T")[0],
+      start_time: new Date().toTimeString().slice(0, 5),
+      label: 'Unassigned', medicineName: '', pillCount: 0,
+      schedule: [], isBlinking: false, adherenceRate: 0, history: []
+    },
+    {
+      id: 3, color_code: 0, dosage: "0", duration_days: 0,
+      start_date: new Date().toISOString().split("T")[0],
+      start_time: new Date().toTimeString().slice(0, 5),
+      label: 'Unassigned', medicineName: '', pillCount: 0,
+      schedule: [], isBlinking: false, adherenceRate: 0, history: []
+    },
+    {
+      id: 4, color_code: 0, dosage: "0", duration_days: 0,
+      start_date: new Date().toISOString().split("T")[0],
+      start_time: new Date().toTimeString().slice(0, 5),
+      label: 'Unassigned', medicineName: '', pillCount: 0,
+      schedule: [], isBlinking: false, adherenceRate: 0, history: []
+    },
+  ],
+  lastLocation: { lat: 10.3157, lng: 123.8854 }, // Centered on Cebu City
+  riskScore: 45
 };
 
 const FALLBACK_REGION = {
@@ -422,7 +432,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                 <PartitionConfig
                     partition={configPartition}
                     onSave={(data) => {
-                      const updatedP = { ...configPartition, ...data as Partition };
+                      const updatedP = {...configPartition, ...data as Partition};
 
                       // 1. Update Local App State
                       handlePatientUpdate({
@@ -435,8 +445,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
 
                       setConfigPartition(null);
                     }}
-                    onClose={() => setConfigPartition(null)}
-                />
+                    onClose={() => setConfigPartition(null)} cd={undefined}                />
               </Modal>
           )}
         </ScrollView>

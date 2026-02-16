@@ -1,31 +1,26 @@
-// types.ts
-
-export enum AppPhase {
-  SPLASH = 'SPLASH',
-  BLUETOOTH = 'BLUETOOTH',
-  HOME = 'HOME'
-}
-
 export interface Partition {
   id: number;
-  label: string; // e.g. "Morning Meds" or "Diabetes"
+  label: string;
   medicineName: string;
   pillCount: number;
-  schedule: string[]; // ISO Date strings or time strings
+  schedule: string[];
   isBlinking: boolean;
+
   adherenceRate: number;
-  history: boolean[];
+  history: any[]; // Changed from boolean[] to any[] for more flexibility
 
-  // Optional Config Fields
+  // --- ADD THESE TO FIX THE ERRORS ---
+  color_code: number;
+  dosage: string;
+  duration_days: number;
+  start_date: string;
+  start_time: string;
+
+  // These appear in your error logs as well
   isShortTerm?: boolean;
-  durationDays?: number;
-  frequencyType?: 'daily' | 'weekly';
-  selectedDays?: number[]; // 0=Sun, 1=Mon, etc.
+  selectedDays?: number[];
   timesPerDay?: number;
-  dosage?: string;
-  colorTheme?: string; // Renamed from color_code to match your request
 }
-
 export interface PatientRecord {
   id: string;
   name: string;
@@ -33,4 +28,10 @@ export interface PatientRecord {
   partitions: Partition[];
   lastLocation: { lat: number; lng: number };
   riskScore: number;
+}
+
+export enum AppPhase {
+  SPLASH = 'SPLASH',
+  BLUETOOTH = 'BLUETOOTH',
+  HOME = 'HOME'
 }
