@@ -76,10 +76,11 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
         }
     };
 
+    // Find this function around line 100
     const postMedConfig = async (partitionId: number, data: any) => {
         try {
-            // Pointing to your live Render backend
-            const response = await axios.put(`https://pillbox-backend.onrender.com/api/schedule/update/${partitionId}`, data);
+            // CHANGED: Use your Local IP (HTTP) instead of localhost or Render
+            const response = await axios.put(`http://172.20.10.5:8080/api/schedule/update/${partitionId}`, data);
             return response.data;
         } catch (error) {
             console.error("Hardware Sync Error:", error);
