@@ -8,7 +8,8 @@ import { Audio } from 'expo-av';
 import { Base64 } from 'js-base64';
 import { useRoute } from '@react-navigation/native';
 import { Device } from 'react-native-ble-plx';
-import { bleManager } from '@/app/utils/BleService'; //
+import { bleManager } from '@/app/utils/BleService';
+import { LoadingScreen } from '../LoadingScreen';
 
 // --- SUB COMPONENTS ---
 import DeviceLayout from '../DeviceLayout';
@@ -37,13 +38,15 @@ export const INITIAL_PATIENT_DATA: PatientRecord = {
     isBlinking: false,
     adherenceRate: 0,
     history: [] as boolean[],
-    colorTheme: '#cbd5e1',
+    color_code: '#cbd5e1',
     isShortTerm: false,
     durationDays: 0,
     frequencyType: 'daily',
     selectedDays: [] as number[],
     timesPerDay: 0,
-    dosage: ''
+    dosage: '',
+    start_date = new Date().toISOString().split("T")[0],
+    start_time = new Date().toTimeString().slice(0, 5]
   }))
 };
 

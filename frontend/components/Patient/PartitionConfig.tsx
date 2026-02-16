@@ -103,7 +103,7 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
   const postMedConfig = async (partitionId: number, data: any) => {
     try {
         // REPLACE WITH YOUR BACKEND IP
-        const response = await axios.put(`http://192.168.1.XX:8080/api/schedule/update/${partitionId}`, data);
+        const response = await axios.put(`http://localhost:8080/api/schedule/update/${partitionId}`, data);
         return response.data;
     } catch (error) {
         console.error("Hardware Sync Error:", error);

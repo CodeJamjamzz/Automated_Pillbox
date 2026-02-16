@@ -1,3 +1,4 @@
+// types.ts
 
 export enum AppPhase {
   SPLASH = 'SPLASH',
@@ -7,21 +8,22 @@ export enum AppPhase {
 
 export interface Partition {
   id: number;
-  label: string;
+  label: string; // e.g. "Morning Meds" or "Diabetes"
   medicineName: string;
   pillCount: number;
-  schedule: string[]; 
+  schedule: string[]; // ISO Date strings or time strings
   isBlinking: boolean;
   adherenceRate: number;
   history: boolean[];
 
+  // Optional Config Fields
   isShortTerm?: boolean;
   durationDays?: number;
   frequencyType?: 'daily' | 'weekly';
-  selectedDays?: number[];
+  selectedDays?: number[]; // 0=Sun, 1=Mon, etc.
   timesPerDay?: number;
   dosage?: string;
-  colorTheme?: string;
+  colorTheme?: string; // Renamed from color_code to match your request
 }
 
 export interface PatientRecord {
