@@ -107,7 +107,6 @@ public class ScheduleController {
         for (MedicationConfig c : configs) {
             sb.append(c.getSlotId()).append("|").append(c.getCalculatedTimes()).append(";");
         }
-
         return sb.toString();
     }
 
