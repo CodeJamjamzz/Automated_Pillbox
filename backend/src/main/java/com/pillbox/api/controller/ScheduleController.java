@@ -1,8 +1,9 @@
 package com.pillbox.api.controller;
 
 import com.pillbox.api.model.MedicationConfig;
-import com.pillbox.api.repository.MedicationConfigRepository; // You'll need to create this simple interface
+import com.pillbox.api.repository.MedicationConfigRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalTime;
@@ -42,9 +43,14 @@ public class ScheduleController {
         return "Schedule Updated for Slot " + config.getSlotId();
     }
 
+    @GetMapping("/")
+    public List<MedicationConfig> getSchedule(){
+        List<MedicationConfig> list = repository.findAll();
+        return list;
+    }
+
     @PutMapping("/update/{id}")
-    public ResponseEntity<String> setSchedule(@PathVariable Integer id, @RequestBody Partition updatedData) {
-        // 1. Find the existing slot by ID (slotId)
+    public ResponseEntity<String> setSchedule(@PathVariable Integer id, @RequestBody MedicationConfig updatedData) {
         return repository.findById(id).map(config -> {
 
             // 2. Map basic medicine and illness info
@@ -73,7 +79,6 @@ public class ScheduleController {
     }
 
     // 2. ESP32 calls this to get the simple list
-    // Returns format: "1|08:00,12:00;2|09:00,21:00;"
     @GetMapping("/sync")
     public String getSyncData() {
         List<MedicationConfig> configs = repository.findAll();
@@ -82,6 +87,7 @@ public class ScheduleController {
         for (MedicationConfig c : configs) {
             sb.append(c.getSlotId()).append("|").append(c.getCalculatedTimes()).append(";");
         }
+
         return sb.toString();
     }
 }

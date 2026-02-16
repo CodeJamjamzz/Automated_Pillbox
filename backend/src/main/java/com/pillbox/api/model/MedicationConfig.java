@@ -45,11 +45,11 @@ public class MedicationConfig {
         this.pillName = pillName;
     }
 
-    public String getillnessName() {
+    public String getIllnessName() {
         return illnessName;
     }
 
-    public void setillnessName(String illnessName) {
+    public void setIllnessName(String illnessName) {
         this.illnessName = illnessName;
     }
 
@@ -101,8 +101,8 @@ public class MedicationConfig {
 
     public void setStartDate(LocalTime startDate) { this.startDate = startDate; }
 
-    public void getcolorCode() { return this.colorCode; }
+    public String getColorCode() { return this.colorCode; }
 
-    public void setcolorCode(String colorCode) { this.colorCode = colorCode; }
+    public void setColorCode(String colorCode) { this.colorCode = colorCode; }
 
 }

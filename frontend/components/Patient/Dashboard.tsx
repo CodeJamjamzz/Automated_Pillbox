@@ -8,7 +8,8 @@ import { Audio } from 'expo-av';
 import { Base64 } from 'js-base64';
 import { useRoute } from '@react-navigation/native';
 import { Device } from 'react-native-ble-plx';
-import { bleManager } from '@/app/utils/BleService'; //
+import { bleManager } from '@/app/utils/BleService';
+import { LoadingScreen } from '../LoadingScreen';
 
 // --- SUB COMPONENTS ---
 import DeviceLayout from '../DeviceLayout';

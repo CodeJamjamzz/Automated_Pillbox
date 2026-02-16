@@ -7,6 +7,7 @@ import { Layout } from '../../components/Layout';
 import SplashScreen from '../../components/SplashScreen';
 import BluetoothScreen from '../../components/BluetoothScreen';
 import AlarmModal from '../../components/Patient/AlarmModal';
+import LoadingScreen from "../components/LoadingScreen";
 
 const INITIAL_PATIENT: PatientRecord = {
   id: 'P001',
@@ -25,6 +26,7 @@ const INITIAL_PATIENT: PatientRecord = {
 };
 
 const App: React.FC = () => {
+    const [isLoading, setLoadingScreen] = useState(true)
   const [phase, setPhase] = useState<AppPhase>(AppPhase.SPLASH);
   const [connectedDevice, setConnectedDevice] = useState<string | null>(null);
   const [patient, setPatient] = useState<PatientRecord>(INITIAL_PATIENT);
@@ -86,14 +88,22 @@ const App: React.FC = () => {
     return <BluetoothScreen onConnect={handleConnect} />;
   }
 
+  useEffect(() => {
+      try {
+          axios.get("")
+      }
+
+      })
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
       <Layout onDisconnect={handleDisconnect}>
-        <PatientDashboard 
-          patient={patient} 
-          onUpdate={setPatient} 
-        />
+        { isLoading? <LoadingScreen/> :
+                    <PatientDashboard
+                      patient={patient}
+                      onUpdate={setPatient} />
+        }
       </Layout>
 
       {activeAlarm && (
