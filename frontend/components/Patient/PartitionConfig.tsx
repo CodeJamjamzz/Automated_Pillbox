@@ -7,7 +7,7 @@ import { Partition } from '../../types';
 import {inspect} from "node:util";
 import styles = module
 
-// --- CONSTANTS ---
+// --- CONSTANTS ---//
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899'];
 const WEEKDAYS = [
   { label: 'Sun', value: 0 }, { label: 'Mon', value: 1 }, { label: 'Tue', value: 2 },
