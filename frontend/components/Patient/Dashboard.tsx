@@ -38,13 +38,15 @@ export const INITIAL_PATIENT_DATA: PatientRecord = {
     isBlinking: false,
     adherenceRate: 0,
     history: [] as boolean[],
-    colorTheme: '#cbd5e1',
+    color_code: '#cbd5e1',
     isShortTerm: false,
     durationDays: 0,
     frequencyType: 'daily',
     selectedDays: [] as number[],
     timesPerDay: 0,
-    dosage: ''
+    dosage: '',
+    start_date = new Date().toISOString().split("T")[0],
+    start_time = new Date().toTimeString().slice(0, 5]
   }))
 };
 

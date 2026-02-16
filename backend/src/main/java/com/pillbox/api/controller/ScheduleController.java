@@ -23,23 +23,38 @@ public class ScheduleController {
     // 1. App sends settings here
     @PostMapping("/set")
     public String setSchedule(@RequestBody MedicationConfig config) {
-        // Calculate the alarms based on Start Time and Interval
-        List<String> times = new ArrayList<>();
-        LocalTime current = config.getStartTime();
 
-        // Limit to max 4 alarms per day as requested
-        for (int i = 0; i < 4; i++) {
-            times.add(current.format(DateTimeFormatter.ofPattern("HH:mm")));
-            current = current.plusHours(config.getIntervalHours());
-
-            // Break if we wrap around to the next day (optional logic)
-            // if (current.isBefore(config.getStartTime())) break;
+        // --- VALIDATION LOCK ---
+        // Ensure we only touch Slots 1-4
+        if (config.getSlotId() == null || config.getSlotId() < 1 || config.getSlotId() > 4) {
+            throw new RuntimeException("ERROR: Only Slots 1-4 are allowed.");
         }
 
-        // Join into string "08:00,12:00,16:00"
+        List<String> times = new ArrayList<>();
+
+        // Use existing start time or default to now if missing
+        LocalTime current = (config.getStartTime() != null) ? config.getStartTime() : LocalTime.now();
+        LocalTime start = current;
+
+        // Safety: Prevent infinite loops if interval is 0 (disable alarms)
+        if (config.getIntervalHours() <= 0) {
+            config.setCalculatedTimes(""); // Clear alarms
+            repository.save(config);
+            return "Alarms Disabled for Slot " + config.getSlotId();
+        }
+
+        // Logic to generate 08:00, 12:00, etc.
+        do {
+            times.add(current.format(DateTimeFormatter.ofPattern("HH:mm")));
+            current = current.plusHours(config.getIntervalHours());
+        } while (current.isAfter(start) && times.size() < 24); // Limit to 24 alarms max
+
+        // Join into string "08:00,12:00..."
         config.setCalculatedTimes(String.join(",", times));
 
+        // JPA "save" acts as an UPDATE because the ID (1-4) already exists
         repository.save(config);
+
         return "Schedule Updated for Slot " + config.getSlotId();
     }
 
@@ -51,6 +66,7 @@ public class ScheduleController {
 
     @PutMapping("/update/{id}")
     public ResponseEntity<String> setSchedule(@PathVariable Integer id, @RequestBody MedicationConfig updatedData) {
+        // 1. Find the existing slot by ID (slotId)
         return repository.findById(id).map(config -> {
 
             // 2. Map basic medicine and illness info
@@ -79,8 +95,12 @@ public class ScheduleController {
     }
 
     // 2. ESP32 calls this to get the simple list
+    // Returns format: "1|08:00,12:00;2|09:00,21:00;"
     @GetMapping("/sync")
     public String getSyncData() {
+        // --- ADDED LOG ---
+        System.out.println(">>> ESP32 REQUESTED SCHEDULE SYNC");
+
         List<MedicationConfig> configs = repository.findAll();
         StringBuilder sb = new StringBuilder();
 
@@ -89,5 +109,17 @@ public class ScheduleController {
         }
 
         return sb.toString();
+    }
+
+    @PostMapping("/decrement/{slotId}")
+    public String decrementPills(@PathVariable Integer slotId) {
+        MedicationConfig config = repository.findById(slotId).orElse(null);
+        if (config != null && config.getPillAmount() > 0) {
+            config.setPillAmount(config.getPillAmount() - 1);
+            repository.save(config);
+            System.out.println(">>> PILL TAKEN! Slot " + slotId + " count is now: " + config.getPillAmount());
+            return "Decremented";
+        }
+        return "Slot not found or empty";
     }
 }

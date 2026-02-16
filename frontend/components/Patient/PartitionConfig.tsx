@@ -4,6 +4,8 @@ import { X, Clock, Calendar, ChevronRight, Pill, Check, Plus, Minus, Save, Alert
 import DateTimePicker from '@react-native-community/datetimepicker';
 import axios from 'axios';
 import { Partition } from '../../types';
+import {inspect} from "node:util";
+import styles = module
 
 // --- CONSTANTS ---
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899'];
