@@ -876,7 +876,7 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
 
       {/* --- MAINTENANCE SCHEDULE MODAL --- */}
       <Modal visible={isScheduleModalVisible} animationType="slide" presentationStyle="pageSheet">
-        {/* MODAL SAFE AREA */}
+        {/* MODAL SAFE AREA" */}
         <SafeAreaView style={styles.modalContainer}>
             <View style={styles.modalHeader}>
                 <TouchableOpacity onPress={() => setScheduleModalVisible(false)}>
