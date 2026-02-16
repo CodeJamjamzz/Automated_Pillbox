@@ -15,7 +15,7 @@ const WEEKDAYS = [
   { label: 'Sat', value: 6 },
 ];
 
-interface PartitionConfigProps {
+interface PartitionConfigProps {cd
   partition: Partition;
   onSave: (data: any) => void;
   onClose: () => void;

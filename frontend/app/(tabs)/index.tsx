@@ -7,17 +7,17 @@ import { Layout } from '../../components/Layout';
 import SplashScreen from '../../components/SplashScreen';
 import BluetoothScreen from '../../components/BluetoothScreen';
 import AlarmModal from '../../components/Patient/AlarmModal';
-import LoadingScreen from "../components/LoadingScreen";
+import LoadingScreen from "../../components/LoadingScreen";
 
 const INITIAL_PATIENT: PatientRecord = {
   id: 'P001',
   name: 'User',
   age: 68,
   partitions: [
-    { id: 1, color_code = 0, dosage = 0, duration_days = 0,start_date = new Date().toISOString().split("T")[0], start_time = new Date().toTimeString().slice(0, 5], label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [], isBlinking: false, adherenceRate: 0, history: [] },
-    { id: 2,color_code = 0, dosage = 0, duration_days = 0,start_date = new Date().toISOString().split("T")[0], start_time = new Date().toTimeString().slice(0, 5], label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [], isBlinking: false, adherenceRate: 0, history: [] },
-    { id: 3,color_code = 0, dosage = 0, duration_days = 0,start_date = new Date().toISOString().split("T")[0], start_time = new Date().toTimeString().slice(0, 5], label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [], isBlinking: false, adherenceRate: 0, history: [] },
-    { id: 4,color_code = 0, dosage = 0, duration_days = 0,start_date = new Date().toISOString().split("T")[0], start_time = new Date().toTimeString().slice(0, 5], label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [], isBlinking: false, adherenceRate: 0, history: [] },
+    { id: 1, color_code: 0, dosage: 0, duration_days: 0,start_date: new Date().toISOString().split("T")[0], start_time: new Date().toTimeString().slice(0, 5), label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [], isBlinking: false, adherenceRate: 0, history: [] },
+    { id: 2,color_code: 0, dosage: 0, duration_days: 0,start_date: new Date().toISOString().split("T")[0], start_time: new Date().toTimeString().slice(0, 5), label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [], isBlinking: false, adherenceRate: 0, history: [] },
+    { id: 3,color_code: 0, dosage: 0, duration_days: 0,start_date: new Date().toISOString().split("T")[0], start_time: new Date().toTimeString().slice(0, 5), label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [], isBlinking: false, adherenceRate: 0, history: [] },
+    { id: 4,color_code: 0, dosage: 0, duration_days: 0,start_date: new Date().toISOString().split("T")[0], start_time: new Date().toTimeString().slice(0, 5), label: 'Unassigned', medicineName: '', pillCount: 0, schedule: [], isBlinking: false, adherenceRate: 0, history: [] },
   ],
   lastLocation: { lat: 40.7128, lng: -74.0060 },
   riskScore: 45
@@ -105,7 +105,7 @@ const App: React.FC = () => {
               const response = await axios.get("http://localhost:8080/api/schedule/")
               const slotList: Slot[] = response.data;
 
-              for (let i = 0; i < slotList.length; i++)
+              for (let i = 0; i < slotList.length; i++){
                   slotList[i] = response.data[i];
                   if(slotList[i].illness_name != null){
                       partitions[i].schedule = slotList[i].calculated_times.text.trim().split(/\s+/);
