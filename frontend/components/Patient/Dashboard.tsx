@@ -23,10 +23,10 @@ import { registerForNotifications } from '@/app/utils/NotificationService';
 
 // --- INITIAL STATE & CONSTANTS ---
 export const INITIAL_PATIENT_DATA: PatientRecord = {
-  id: 'patient-1',
-  name: 'User',
-  age: 65,
-  riskScore: 0,
+  id: 'patient-1', //walay labot
+  name: 'User',    //walay labot
+  age: 65,         //walay labot
+  riskScore: 0,    //walay labot
   lastLocation: { lat: 10.3292, lng: 123.9063 },
   partitions: Array.from({ length: 4 }).map((_, i) => ({
     id: i + 1,
