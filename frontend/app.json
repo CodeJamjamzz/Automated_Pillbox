@@ -9,7 +9,9 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "bundleIdentifier": "com.autin.frontend"
     },
     "android": {
       "adaptiveIcon": {
@@ -25,6 +27,7 @@
         "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_CONNECT"
       ],
+      "googleServicesFile": "./google-services.json",
       "package": "com.autin.frontend"
     },
     "web": {
@@ -36,7 +39,10 @@
         "@config-plugins/react-native-ble-plx",
         {
           "isBackgroundEnabled": false,
-          "modes": ["peripheral", "central"]
+          "modes": [
+            "peripheral",
+            "central"
+          ]
         }
       ],
       "expo-router",
