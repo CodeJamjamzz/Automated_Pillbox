@@ -21,6 +21,10 @@ import PartitionConfig from './PartitionConfig';
 import AlarmModal from './AlarmModal';
 import { registerForNotifications } from '@/app/utils/NotificationService';
 
+// --- FIREBASE RTDB IMPORTS ---
+import { ref, update } from "firebase/database";
+import { rtdb } from "@/app/utils/firebase";
+
 // --- INITIAL STATE & CONSTANTS ---
 const INITIAL_PATIENT_DATA: PatientRecord = {
   id: 'P001',
@@ -73,9 +77,18 @@ interface PatientDashboardProps {
 }
 
 const Dashboard: React.FC<PatientDashboardProps> = (props) => {
-  const [patient, setPatient] = useState<PatientRecord>(INITIAL_PATIENT_DATA);
+  const [patient, setPatient] = useState<PatientRecord>(props.patient || INITIAL_PATIENT_DATA);
   const [configPartition, setConfigPartition] = useState<Partition | null>(null);
 
+  // --- ADD THIS NEW BLOCK RIGHT HERE ---
+  // This forces the Dashboard to instantly update whenever Firebase sends new data!
+  useEffect(() => {
+    if (props.patient) {
+      setPatient(props.patient);
+    }
+  }, [props.patient]);
+  // -------------------------------------
+  
   // --- ALARM & TIME STATE ---
   const [activeAlarmPartition, setActiveAlarmPartition] = useState<Partition | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -374,11 +387,11 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
 
           {/* COMPONENT 3: LOCATION TRACKER (Map Widget) */}
           {/*<LocationTracker*/}
-          {/*    permissionStatus={permissionStatus}*/}
-          {/*    userLocation={userLocation}*/}
-          {/*    kitLocation={kitLocation}*/}
-          {/*    onRequestPermission={requestLocationPermission}*/}
-          {/*    onShowFullMap={() => setShowFullMap(true)}*/}
+          {/* permissionStatus={permissionStatus}*/}
+          {/* userLocation={userLocation}*/}
+          {/* kitLocation={kitLocation}*/}
+          {/* onRequestPermission={requestLocationPermission}*/}
+          {/* onShowFullMap={() => setShowFullMap(true)}*/}
           {/*/>*/}
 
           {/* MODAL: FULL SCREEN MAP (Kept here to overlay everything) */}
@@ -431,21 +444,49 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
               <Modal animationType="slide" visible={true} onRequestClose={() => setConfigPartition(null)}>
                 <PartitionConfig
                     partition={configPartition}
-                    onSave={(data) => {
-                      const updatedP = {...configPartition, ...data as Partition};
-
-                      // 1. Update Local App State
+                    onSave={async (data) => {
+                      const updatedP = {...configPartition, ...data as Partition, color_code: (data as Partition).color_code ?? configPartition.color_code};
+                      
+                      // 1. Optimistic UI Update
                       handlePatientUpdate({
                         ...patient,
                         partitions: patient.partitions.map(p => p.id === configPartition.id ? updatedP : p)
                       });
 
-                      // 2. SYNC TO ESP32 IMMEDIATELY
-                      syncScheduleToHardware(updatedP);
+                      // 2. Format times for ESP32 (e.g., "08:00,14:00")
+                      let timesString = "";
+                      if (updatedP.schedule && updatedP.schedule.length > 0) {
+                        timesString = updatedP.schedule.map(isoStr => {
+                          const d = new Date(isoStr);
+                          return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+                        }).join(",");
+                      }
 
+                      // 3. Push EVERYTHING to Firebase RTDB
+                      try {
+                          const { ref, update } = await import("firebase/database");
+                          const { rtdb } = await import("@/app/utils/firebase");
+                          
+                          const slotRef = ref(rtdb, `pillbox_001/slots/${updatedP.id}`);
+                          await update(slotRef, { 
+                              amount: updatedP.pillCount,
+                              times: timesString,
+                              // --- ADDED NEW FIELDS HERE ---
+                              medicineName: updatedP.medicineName || '',
+                              illness: updatedP.illness || '',
+                              dosage: updatedP.dosage || '',
+                              color_code: updatedP.color_code !== undefined ? updatedP.color_code : 4,
+                              timesPerDay: updatedP.timesPerDay || 1,
+                              start_date: updatedP.start_date || '',
+                              start_time: updatedP.start_time || ''
+                          });
+                      } catch (error) {
+                          console.error("Failed to save to Firebase RTDB:", error);
+                      }
+                      
                       setConfigPartition(null);
                     }}
-                    onClose={() => setConfigPartition(null)} cd={undefined}                />
+                    onClose={() => setConfigPartition(null)}               />
               </Modal>
           )}
         </ScrollView>

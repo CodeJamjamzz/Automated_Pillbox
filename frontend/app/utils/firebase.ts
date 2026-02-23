@@ -1,5 +1,5 @@
-import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getDatabase } from "firebase/database";
 import { getAuth } from "firebase/auth";
 
 // Your verified MedSync configuration
@@ -15,8 +15,8 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize and export services for use in your Dashboard and Config components
-export const db = getFirestore(app);
+export const rtdb = getDatabase(app);
 export const auth = getAuth(app);

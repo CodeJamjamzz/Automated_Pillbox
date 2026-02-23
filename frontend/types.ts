@@ -3,23 +3,29 @@ export interface Partition {
   label: string;
   medicineName: string;
   pillCount: number;
-  schedule: string[];
+  schedule: string[]; 
   isBlinking: boolean;
-
   adherenceRate: number;
-  history: any[]; // Changed from boolean[] to any[] for more flexibility
+  // Note: changed from boolean[] to any[] to allow empty arrays [] from your INITIAL_PATIENT state
+  history: any[];
+
+  // --- NEW FIELDS WE ADDED FOR FIREBASE ---
+  illness?: string;
 
   // --- ADD THESE TO FIX THE ERRORS ---
   color_code: number;
   dosage: string;
-  duration_days: number;
-  start_date: string;
-  start_time: string;
+  duration_days?: number;
+  start_date?: string;
+  start_time?: string;
 
   // These appear in your error logs as well
   isShortTerm?: boolean;
   selectedDays?: number[];
   timesPerDay?: number;
+  frequencyType?: 'daily' | 'weekly';
+  colorTheme?: string;
+  
 }
 export interface PatientRecord {
   id: string;

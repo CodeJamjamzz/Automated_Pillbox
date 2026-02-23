@@ -583,11 +583,9 @@ import {
   Check,
   Plus,
   Minus,
-  Link as LinkIcon,
-  Calendar
+  Link as LinkIcon
 } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import axios from 'axios';
 
 // --- TYPES ---
 interface Partition {
@@ -595,7 +593,6 @@ interface Partition {
   label: string;
   medicineName: string;
   pillCount: number;
-  color_code: number;
   duration_days?: number;
   dosage?: string;
   start_date?: string;
@@ -603,6 +600,7 @@ interface Partition {
   schedule?: string[];
   illness?: string;
   timesPerDay?: number;
+  selectedDays?: number[];
 }
 
 interface PartitionConfigProps {
@@ -611,11 +609,7 @@ interface PartitionConfigProps {
   onClose: () => void;
 }
 
-// --- CONSTANTS ---
-const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899'];
-
-// Update this IP to match your Spring Boot server's IP address
-const API_BASE_URL = 'http://192.168.1.192:8080/api/schedule';
+const DAYS_OF_WEEK = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, onClose }) => {
   const isEditMode = partition.label !== 'Unassigned' && partition.medicineName !== '';
@@ -624,18 +618,20 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
   const [illness, setIllness] = useState(partition.illness || '');
   const [medName, setMedName] = useState(partition.medicineName || '');
   const [pillCount, setPillCount] = useState(partition.pillCount || 0);
+  const [dosage, setDosage] = useState(partition.dosage || '');
 
   // Schedule Details
-  const [dosage, setDosage] = useState(partition.dosage || '');
-  const [selectedColorIdx, setSelectedColorIdx] = useState(
-    typeof partition.color_code === 'number' ? partition.color_code : 4
-  );
-
-  // Frequency
   const [timesPerDay, setTimesPerDay] = useState(() => {
     if (partition.timesPerDay) return partition.timesPerDay;
     if (partition.schedule && partition.schedule.length > 0) return partition.schedule.length;
     return 1;
+  });
+
+  // Selected Days Array (0 = Sunday, 6 = Saturday)
+  const [selectedDays, setSelectedDays] = useState<number[]>(() => {
+    return partition.selectedDays && partition.selectedDays.length > 0
+      ? partition.selectedDays
+      : [0, 1, 2, 3, 4, 5, 6];
   });
 
   // Date & Time
@@ -675,19 +671,28 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
     setShowPicker(true);
   };
 
+  const toggleDay = (index: number) => {
+    if (selectedDays.includes(index)) {
+      if (selectedDays.length > 1) { // Prevent deselecting all days
+        setSelectedDays(selectedDays.filter(d => d !== index));
+      } else {
+        Alert.alert("Invalid Selection", "You must select at least one day.");
+      }
+    } else {
+      setSelectedDays([...selectedDays, index].sort());
+    }
+  };
+
   const confirmScheduleConfig = () => {
     setIsScheduleConfigured(true);
     setScheduleModalVisible(false);
   };
 
   const handleFinalSave = async () => {
-    // Validation 1: Medicine Name
     if (!medName.trim()) {
       Alert.alert("Missing Information", "Please enter a medicine name.");
       return;
     }
-
-    // Validation 2: Pill Count > 0
     if (pillCount <= 0) {
       Alert.alert("Invalid Pill Count", "Please add at least 1 pill to the inventory before saving.");
       return;
@@ -706,53 +711,32 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
         generatedTimes.push(currentScan.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
         currentScan.setHours(currentScan.getHours() + intervalHours);
       }
-      const calculatedTimesStr = generatedTimes.join(",");
 
       const formattedStartDate = startDate.toISOString().split('T')[0];
       const formattedStartTime = firstDoseTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-      const apiPayload = {
-        pillName: medName,
-        illnessName: illness,
-        pillAmount: pillCount,
+      // Generate the payload for the UI and parent component
+      const uiPayload = {
+        ...partition,
+        label: medName,
+        medicineName: medName,
+        illness: illness,
+        pillCount: pillCount,
         dosage: dosage,
-        colorCode: selectedColorIdx,
-        startDate: formattedStartDate,
-        startTime: formattedStartTime,
-        intervalHours: intervalHours,
-        durationDays: 365,
-        calculatedTimes: calculatedTimesStr
+        start_date: formattedStartDate,
+        start_time: formattedStartTime, // FIRST DOSE TIME
+        schedule: generatedTimes,
+        timesPerDay: timesPerDay,
+        selectedDays: selectedDays, // SCHEDULE TYPE
+        duration_days: 365,
       };
 
-      console.log("PUT Request to:", `${API_BASE_URL}/update/${partition.id}`);
-
-      const response = await axios.put(`${API_BASE_URL}/update/${partition.id}`, apiPayload);
-
-      if (response.status === 200) {
-          const uiPayload = {
-            ...partition,
-            label: medName,
-            medicineName: medName,
-            illness: illness,
-            pillCount: pillCount,
-            color_code: selectedColorIdx,
-            dosage: dosage,
-            start_date: formattedStartDate,
-            start_time: formattedStartTime,
-            schedule: generatedTimes,
-            timesPerDay: timesPerDay,
-            duration_days: 365,
-          };
-
-          onSave(uiPayload);
-          onClose();
-      } else {
-        throw new Error("Server returned status: " + response.status);
-      }
+      onSave(uiPayload);
+      onClose();
 
     } catch (error) {
-      console.error("Database Error:", error);
-      Alert.alert("Sync Failed", "Could not save to the PillBox. Please check your Wi-Fi connection.");
+      console.error("Config Error:", error);
+      Alert.alert("Error", "Could not configure the schedule.");
     } finally {
       setLoading(false);
     }
@@ -767,13 +751,14 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
         display={Platform.OS === 'ios' ? 'spinner' : 'default'}
         onChange={handleDateChange}
         minimumDate={new Date()}
+        textColor="#0f172a"    // Forces the text to be dark slate
+        themeVariant="light"   // Forces the iOS picker to use the light mode style
       />
     );
   };
 
   return (
     <View style={styles.container}>
-      {/* HEADER SAFE AREA */}
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
@@ -793,25 +778,13 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
             {/* ILLNESS */}
             <View style={styles.inputGroup}>
                 <Text style={styles.label}>ILLNESS / PURPOSE</Text>
-                <TextInput
-                    style={styles.input}
-                    placeholder="e.g. Heart Condition"
-                    placeholderTextColor="#94a3b8"
-                    value={illness}
-                    onChangeText={setIllness}
-                />
+                <TextInput style={styles.input} placeholder="e.g. Heart Condition" placeholderTextColor="#94a3b8" value={illness} onChangeText={setIllness} />
             </View>
 
             {/* MEDICINE */}
             <View style={styles.inputGroup}>
                 <Text style={styles.label}>MEDICINE NAME</Text>
-                <TextInput
-                    style={[styles.input, styles.largeInput]}
-                    placeholder="e.g. Atorvastatin 20mg"
-                    placeholderTextColor="#94a3b8"
-                    value={medName}
-                    onChangeText={setMedName}
-                />
+                <TextInput style={[styles.input, styles.largeInput]} placeholder="e.g. Atorvastatin 20mg" placeholderTextColor="#94a3b8" value={medName} onChangeText={setMedName} />
             </View>
 
             {/* PILL COUNTER */}
@@ -829,9 +802,7 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
                         <Plus size={24} color="#64748b" />
                     </TouchableOpacity>
                 </View>
-                {pillCount === 0 && (
-                   <Text style={styles.errorText}>* Must be greater than 0</Text>
-                )}
+                {pillCount === 0 && <Text style={styles.errorText}>* Must be greater than 0</Text>}
             </View>
 
             {/* SCHEDULE CARD */}
@@ -861,31 +832,19 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
       </KeyboardAvoidingView>
 
       <View style={styles.footer}>
-        <TouchableOpacity
-            style={[styles.finalSaveBtn, pillCount === 0 && styles.finalSaveBtnDisabled]}
-            onPress={handleFinalSave}
-            disabled={loading}
-        >
-            {loading ? (
-                <Text style={styles.finalSaveText}>SYNCING...</Text>
-            ) : (
-                <Text style={styles.finalSaveText}>SAVE CHANGES</Text>
-            )}
+        <TouchableOpacity style={[styles.finalSaveBtn, pillCount === 0 && styles.finalSaveBtnDisabled]} onPress={handleFinalSave} disabled={loading}>
+            {loading ? <Text style={styles.finalSaveText}>SAVING...</Text> : <Text style={styles.finalSaveText}>SAVE CHANGES</Text>}
         </TouchableOpacity>
       </View>
 
       {/* --- MAINTENANCE SCHEDULE MODAL --- */}
       <Modal visible={isScheduleModalVisible} animationType="slide" presentationStyle="pageSheet">
-        {/* MODAL SAFE AREA" */}
         <SafeAreaView style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-                <TouchableOpacity onPress={() => setScheduleModalVisible(false)}>
-                    <Text style={styles.cancelText}>Back</Text>
-                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setScheduleModalVisible(false)}><Text style={styles.cancelText}>Back</Text></TouchableOpacity>
                 <View style={styles.modalTitleContainer}>
                     <LinkIcon size={16} color="#2563eb" style={{marginRight: 6}} />
                     <Text style={styles.modalTitle}>Schedule Details</Text>
-                    <View style={styles.badge}><Text style={styles.badgeText}>MAINTENANCE</Text></View>
                 </View>
                 <View style={{width: 40}} />
             </View>
@@ -905,12 +864,24 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
                     </View>
                 </View>
 
-                {/* Row 2: STATIC EVERY DAY LABEL */}
+                {/* SCHEDULE TYPE (Interactive Days) */}
                 <View style={styles.inputGroup}>
-                    <Text style={styles.modalLabel}>SCHEDULE TYPE</Text>
-                    <View style={styles.staticInput}>
-                        <Text style={styles.staticInputText}>Every Day</Text>
-                        <Calendar size={18} color="#64748b" />
+                    <Text style={styles.modalLabel}>
+                      SCHEDULE TYPE: {selectedDays.length === 7 ? 'Every Day' : 'Custom Days'}
+                    </Text>
+                    <View style={styles.daysRow}>
+                        {DAYS_OF_WEEK.map((day, idx) => {
+                            const isSelected = selectedDays.includes(idx);
+                            return (
+                                <TouchableOpacity 
+                                  key={idx} 
+                                  onPress={() => toggleDay(idx)} 
+                                  style={[styles.dayCircle, isSelected && styles.dayCircleActive]}
+                                >
+                                    <Text style={[styles.dayText, isSelected && styles.dayTextActive]}>{day}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
                     </View>
                 </View>
 
@@ -925,16 +896,6 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
                         <TouchableOpacity style={styles.modalInput} onPress={() => showDatePicker('time')}>
                             <Text style={styles.modalInputValue}>{firstDoseTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</Text>
                         </TouchableOpacity>
-                    </View>
-                </View>
-
-                {/* Row 4 */}
-                <View style={styles.inputGroup}>
-                    <Text style={styles.modalLabel}>LABEL COLOR</Text>
-                    <View style={styles.colorRow}>
-                        {COLORS.map((c, idx) => (
-                            <TouchableOpacity key={c} onPress={() => setSelectedColorIdx(idx)} style={[styles.colorCircle, { backgroundColor: c }, selectedColorIdx === idx && styles.colorCircleActive]} />
-                        ))}
                     </View>
                 </View>
 
@@ -955,125 +916,67 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
             {Platform.OS === 'android' && renderPicker()}
         </SafeAreaView>
       </Modal>
-
-      {/* SYNC OVERLAY */}
-      {loading && (
-        <View style={styles.loadingOverlay}>
-            <View style={styles.loadingBox}>
-                <ActivityIndicator size="large" color="#2563eb" />
-                <Text style={styles.loadingText}>Syncing with Cloud...</Text>
-            </View>
-        </View>
-      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
-
-  // --- UPDATED SAFE AREA (TOP) ---
-  safeArea: {
-      backgroundColor: '#fff',
-      // Adds specific padding for Android status bar overlap
-      paddingTop: Platform.OS === 'android' ? 40 : 0
-  },
-
+  safeArea: { backgroundColor: '#fff', paddingTop: Platform.OS === 'android' ? 40 : 0 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: '#f1f5f9' },
   headerTextContainer: { alignItems: 'center' },
   headerTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
   headerSubtitle: { fontSize: 10, color: '#94a3b8', fontWeight: '700', marginTop: 2, letterSpacing: 0.5 },
   closeBtn: { padding: 8 },
   content: { padding: 24 },
-
   inputGroup: { marginBottom: 24 },
   label: { fontSize: 12, fontWeight: '700', color: '#94a3b8', marginBottom: 10, letterSpacing: 0.5 },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 16, fontSize: 16, color: '#0f172a', fontWeight: '500' },
   largeInput: { fontSize: 18, fontWeight: '600' },
-
-  // Static Input for Every Day
-  staticInput: {
-    backgroundColor: '#f1f5f9',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between'
-  },
-  staticInputText: { fontSize: 15, color: '#64748b', fontWeight: '600' },
-
   counterSection: { marginBottom: 24 },
   counterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', padding: 8, borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0' },
   counterBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
   countDisplay: { alignItems: 'center' },
   countText: { fontSize: 32, fontWeight: '800', color: '#0f172a' },
-  countTextZero: { color: '#ef4444' }, // Red if 0
+  countTextZero: { color: '#ef4444' }, 
   countLabel: { fontSize: 10, fontWeight: '700', color: '#94a3b8', marginTop: 4 },
   errorText: { color: '#ef4444', fontSize: 12, fontWeight: '600', marginTop: 8, textAlign: 'center' },
-
   createScheduleCard: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e2e8f0', borderStyle: 'dashed', gap: 12 },
   blueIconBg: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#3b82f6', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   cardTitle: { fontSize: 18, fontWeight: '700', color: '#0f172a' },
   cardSubtitle: { fontSize: 14, color: '#64748b' },
-
   successScheduleCard: { backgroundColor: '#f0fdf4', borderRadius: 20, padding: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#bbf7d0', gap: 12 },
   greenIconBg: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#22c55e', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   successTitle: { fontSize: 18, fontWeight: '700', color: '#15803d' },
   successSubtitle: { fontSize: 14, color: '#166534' },
-
-  // --- UPDATED FOOTER (BOTTOM) ---
-  footer: {
-    padding: 20,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderColor: '#f1f5f9',
-    // Adds extra padding for Home Indicator / Navigation Bar
-    paddingBottom: Platform.OS === 'ios' ? 48 : 34
-  },
+  footer: { padding: 20, backgroundColor: '#fff', borderTopWidth: 1, borderColor: '#f1f5f9', paddingBottom: Platform.OS === 'ios' ? 48 : 34 },
   finalSaveBtn: { backgroundColor: '#2563eb', borderRadius: 14, height: 56, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', shadowColor: '#2563eb', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
   finalSaveBtnDisabled: { backgroundColor: '#94a3b8' },
   finalSaveText: { color: '#fff', fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
-
-  modalContainer: {
-      flex: 1,
-      backgroundColor: '#f8fafc',
-      // Ensure Modal also clears Android status bar
-      paddingTop: Platform.OS === 'android' ? 20 : 0
-  },
+  modalContainer: { flex: 1, backgroundColor: '#f8fafc', paddingTop: Platform.OS === 'android' ? 20 : 0 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#f1f5f9' },
   cancelText: { color: '#64748b', fontSize: 16 },
   modalTitleContainer: { flexDirection: 'row', alignItems: 'center' },
   modalTitle: { fontWeight: '700', fontSize: 16, color: '#0f172a', marginRight: 8 },
-  badge: { backgroundColor: '#dcfce7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  badgeText: { color: '#15803d', fontSize: 10, fontWeight: '700' },
   modalContent: { padding: 20 },
   row: { flexDirection: 'row', marginBottom: 20 },
   col: { flex: 1 },
   modalLabel: { fontSize: 11, fontWeight: '700', color: '#64748b', marginBottom: 8, textTransform: 'uppercase' },
   modalInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 12, fontSize: 15, color: '#0f172a', fontWeight: '500' },
   modalInputValue: { fontSize: 15, color: '#0f172a' },
-  colorRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  colorCircle: { width: 32, height: 32, borderRadius: 16 },
-  colorCircleActive: { borderWidth: 3, borderColor: '#fff', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 3, transform: [{scale: 1.1}] },
 
-  // --- UPDATED MODAL FOOTER ---
-  modalFooter: {
-      padding: 20,
-      backgroundColor: '#fff',
-      borderTopWidth: 1,
-      borderColor: '#f1f5f9',
-      // Adds extra padding for Home Indicator
-      paddingBottom: Platform.OS === 'ios' ? 34 : 24
-  },
+  // --- NEW DAY SELECTOR STYLES ---
+  daysRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  dayCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e2e8f0' },
+  dayCircleActive: { backgroundColor: '#3b82f6', borderColor: '#2563eb' },
+  dayText: { fontSize: 14, fontWeight: '700', color: '#64748b' },
+  dayTextActive: { color: '#ffffff' },
+
+  modalFooter: { padding: 20, backgroundColor: '#fff', borderTopWidth: 1, borderColor: '#f1f5f9', paddingBottom: Platform.OS === 'ios' ? 34 : 24 },
   saveScheduleBtn: { backgroundColor: '#2563eb', borderRadius: 12, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   saveScheduleText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   pickerWrapper: { backgroundColor: '#f1f5f9', marginTop: 16, borderRadius: 12, overflow: 'hidden' },
-  pickerDone: { alignItems: 'flex-end', padding: 12, backgroundColor: '#e2e8f0' },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.8)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
-  loadingBox: { alignItems: 'center', gap: 16 },
-  loadingText: { fontSize: 16, fontWeight: '600', color: '#334155' }
+  pickerDone: { alignItems: 'flex-end', padding: 12, backgroundColor: '#e2e8f0' }
 });
 
 export default PartitionConfig;

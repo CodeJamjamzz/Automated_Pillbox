@@ -199,10 +199,9 @@
 // export default App;
 
 import React, { useState, useEffect, useRef } from 'react';
-import { SafeAreaView, StyleSheet, StatusBar, Platform, Alert } from 'react-native';
-import axios from 'axios';
+import { SafeAreaView, StyleSheet, StatusBar } from 'react-native';
 import { Device } from 'react-native-ble-plx';
-import { AppPhase, PatientRecord, Partition } from '../../types'; // Adjust path if needed
+import { AppPhase, PatientRecord, Partition } from '../../types'; 
 import PatientDashboard from '../../components/Patient/Dashboard';
 import { Layout } from '../../components/Layout';
 import SplashScreen from '../../components/SplashScreen';
@@ -210,9 +209,9 @@ import BluetoothScreen from '../../components/BluetoothScreen';
 import AlarmModal from '../../components/Patient/AlarmModal';
 import LoadingScreen from "../../components/LoadingScreen";
 
-// --- CONSTANTS ---
-// Replace with your actual machine's IP address.
-const API_URL = 'http://192.168.1.192:8080/api/schedule/';
+// --- FIREBASE RTDB IMPORTS ---
+import { ref, onValue, update } from "firebase/database";
+import { rtdb } from "../utils/firebase";
 
 // --- INITIAL DATA ---
 const INITIAL_PATIENT: PatientRecord = {
@@ -221,7 +220,6 @@ const INITIAL_PATIENT: PatientRecord = {
     age: 68,
     partitions: Array.from({ length: 4 }).map((_, i) => ({
         id: i + 1,
-        color_code: 4,
         dosage: "",
         duration_days: 0,
         start_date: new Date().toISOString().split("T")[0],
@@ -231,6 +229,7 @@ const INITIAL_PATIENT: PatientRecord = {
         illness: '',
         pillCount: 0,
         schedule: [],
+        selectedDays: [0, 1, 2, 3, 4, 5, 6], // Default Everyday
         isBlinking: false,
         adherenceRate: 0,
         history: []
@@ -239,102 +238,62 @@ const INITIAL_PATIENT: PatientRecord = {
     riskScore: 0
 };
 
-// --- INTERFACES ---
-interface BackendConfig {
-    slotId: number;
-    pillName: string;
-    illnessName: string;
-    pillAmount: number;
-    dosage: string;
-    colorCode: number;
-    startDate: string;
-    startTime: string;
-    intervalHours: number;
-    durationDays: number;
-    calculatedTimes: string;
-}
-
 const App: React.FC = () => {
-    // UI State
-    const [isLoading, setLoadingScreen] = useState(false); // For initial full-screen load
+    const [isLoading, setLoadingScreen] = useState(false); 
     const [phase, setPhase] = useState<AppPhase>(AppPhase.SPLASH);
     const [connectedDevice, setConnectedDevice] = useState<string | null>(null);
-
-    // Data State
     const [patient, setPatient] = useState<PatientRecord>(INITIAL_PATIENT);
     const [activeAlarm, setActiveAlarm] = useState<Partition | null>(null);
     const lastCheckedMinute = useRef<string>("");
 
-    // --- 1. DATA FETCHING FUNCTION ---
-    // Added 'silent' parameter:
-    // If true, it won't show the full LoadingScreen (used for background polling)
-    const fetchData = async (silent = false) => {
-        if (!silent) setLoadingScreen(true);
-
-        try {
-            // console.log(`Syncing with: ${API_URL}`); // Uncomment for debugging
-            const response = await axios.get<BackendConfig[]>(API_URL);
-            const backendData = response.data;
-
-            setPatient(prevPatient => {
-                const updatedPartitions = prevPatient.partitions.map(uiSlot => {
-                    const dbSlot = backendData.find(item => item.slotId === uiSlot.id);
-
-                    if (dbSlot) {
-                        const scheduleArray = dbSlot.calculatedTimes
-                            ? dbSlot.calculatedTimes.split(',').filter(t => t.trim() !== '')
-                            : [];
-
-                        // Return updated slot data
-                        return {
-                            ...uiSlot,
-                            label: dbSlot.pillName || 'Unassigned',
-                            medicineName: dbSlot.pillName || '',
-                            illness: dbSlot.illnessName || '',
-                            pillCount: dbSlot.pillAmount || 0,
-                            dosage: dbSlot.dosage || '',
-                            color_code: dbSlot.colorCode || 4,
-                            start_date: dbSlot.startDate,
-                            start_time: dbSlot.startTime,
-                            duration_days: dbSlot.durationDays,
-                            schedule: scheduleArray,
-                        };
-                    }
-                    return uiSlot;
-                });
-
-                return { ...prevPatient, partitions: updatedPartitions };
-            });
-
-        } catch (error) {
-            console.error('Sync Error:', error);
-        } finally {
-            if (!silent) setLoadingScreen(false);
-        }
-    };
-
-    // --- 2. STARTUP & POLLING LOGIC ---
+    // --- 1. FIREBASE REAL-TIME LISTENER ---
     useEffect(() => {
-        let intervalId: NodeJS.Timeout;
+        let unsubscribe: (() => void) | undefined;
 
         if (phase === AppPhase.HOME) {
-            // A. Initial Fetch (Shows Loading Screen)
-            fetchData(false);
+            setLoadingScreen(true);
+            const slotsRef = ref(rtdb, 'pillbox_001/slots');
 
-            // B. Polling Interval (Background Refresh every 3 seconds)
-            // This ensures the app updates automatically when DB changes
-            intervalId = setInterval(() => {
-                fetchData(true); // 'true' means silent fetch
-            }, 3000);
+            unsubscribe = onValue(slotsRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const slotsData = snapshot.val();
+                    
+                    setPatient(prevPatient => {
+                        const updatedPartitions = prevPatient.partitions.map(p => {
+                            const dbSlot = slotsData[p.id.toString()];
+                            if (dbSlot) {
+                                return {
+                                    ...p,
+                                    pillCount: dbSlot.amount !== undefined ? dbSlot.amount : 0,
+                                    schedule: dbSlot.times ? dbSlot.times.split(',').filter((t: string) => t.trim() !== '') : [],
+                                    label: dbSlot.medicineName || 'Unassigned',
+                                    medicineName: dbSlot.medicineName || '',
+                                    illness: dbSlot.illness || '',
+                                    dosage: dbSlot.dosage || '',
+                                    timesPerDay: dbSlot.timesPerDay || 1,
+                                    start_date: dbSlot.start_date || p.start_date,
+                                    start_time: dbSlot.start_time || p.start_time,
+                                    selectedDays: dbSlot.selectedDays || [0, 1, 2, 3, 4, 5, 6] // Fetch selected days
+                                };
+                            }
+                            return p;
+                        });
+                        return { ...prevPatient, partitions: updatedPartitions };
+                    });
+                }
+                setLoadingScreen(false);
+            }, (error) => {
+                console.error("Firebase Error:", error);
+                setLoadingScreen(false);
+            });
         }
 
-        // Cleanup: Stop polling when leaving Home or component unmounts
         return () => {
-            if (intervalId) clearInterval(intervalId);
+            if (unsubscribe) unsubscribe();
         };
     }, [phase]);
 
-    // --- 3. SPLASH TIMER ---
+    // --- 2. SPLASH TIMER ---
     useEffect(() => {
         if (phase === AppPhase.SPLASH) {
             const timer = setTimeout(() => setPhase(AppPhase.BLUETOOTH), 2500);
@@ -342,7 +301,7 @@ const App: React.FC = () => {
         }
     }, [phase]);
 
-    // --- 4. ALARM CHECKER ---
+    // --- 3. ALARM CHECKER (UPDATED FOR SELECTED DAYS) ---
     useEffect(() => {
         if (phase !== AppPhase.HOME) return;
 
@@ -351,10 +310,14 @@ const App: React.FC = () => {
             const currentH = now.getHours().toString().padStart(2, '0');
             const currentM = now.getMinutes().toString().padStart(2, '0');
             const currentTime = `${currentH}:${currentM}`;
+            const currentDayOfWeek = now.getDay(); // 0 (Sun) to 6 (Sat)
 
             if (currentTime !== lastCheckedMinute.current) {
                 patient.partitions.forEach(p => {
-                    if (p.schedule && p.schedule.includes(currentTime) && p.pillCount > 0) {
+                    // Check if schedule time matches AND today is one of the selected days!
+                    const isTodaySelected = !p.selectedDays || p.selectedDays.includes(currentDayOfWeek);
+
+                    if (p.schedule && p.schedule.includes(currentTime) && p.pillCount > 0 && isTodaySelected) {
                         setActiveAlarm(p);
                         lastCheckedMinute.current = currentTime;
                     }
@@ -365,28 +328,24 @@ const App: React.FC = () => {
         return () => clearInterval(alarmInterval);
     }, [phase, patient.partitions]);
 
-    // --- 5. HANDLERS ---
+    // --- 4. HANDLERS ---
     const handleTakeMed = async (id: number) => {
-        // Optimistic Update
-        setPatient(prev => ({
-            ...prev,
-            partitions: prev.partitions.map(p =>
-                p.id === id ? { ...p, pillCount: Math.max(0, p.pillCount - 1) } : p
-            )
-        }));
+        const slotToUpdate = patient.partitions.find(p => p.id === id);
+        if (!slotToUpdate) return;
+
+        const newAmount = Math.max(0, slotToUpdate.pillCount - 1);
         setActiveAlarm(null);
 
         try {
-             await axios.post(`http://192.168.1.192:8080/api/schedule/decrement/${id}`);
-             // Force an immediate refresh to sync perfectly with DB
-             fetchData(true);
+             const slotRef = ref(rtdb, `pillbox_001/slots/${id}`);
+             await update(slotRef, { amount: newAmount });
         } catch (e) {
-            console.error("Failed to decrement in DB", e);
+            console.error("Failed to update Firebase", e);
         }
     };
 
     const handleConnect = (device: Device) => {
-        setConnectedDevice(device.name || "MedBox Pro");
+        setConnectedDevice(device.name || "MedSync");
         setPhase(AppPhase.HOME);
     };
 
@@ -395,30 +354,18 @@ const App: React.FC = () => {
         setPhase(AppPhase.BLUETOOTH);
     };
 
-    const handleManualRefresh = () => {
-        fetchData(false); // User manually requested refresh, so show loading
-    };
-
-    // --- 6. RENDER ---
+    // --- 5. RENDER ---
     if (phase === AppPhase.SPLASH) return <SplashScreen />;
-
-    if (phase === AppPhase.BLUETOOTH) {
-        return <BluetoothScreen onConnect={handleConnect} />;
-    }
+    if (phase === AppPhase.BLUETOOTH) return <BluetoothScreen onConnect={handleConnect} />;
 
     return (
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" />
-
             <Layout onDisconnect={handleDisconnect}>
                 {isLoading ? (
                     <LoadingScreen />
                 ) : (
-                    <PatientDashboard
-                        patient={patient}
-                        onUpdate={setPatient}
-                        onRefreshRequest={handleManualRefresh}
-                    />
+                    <PatientDashboard patient={patient} onUpdate={setPatient} />
                 )}
             </Layout>
 
@@ -433,11 +380,5 @@ const App: React.FC = () => {
     );
 };
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#f8fafc',
-    },
-});
-
+const styles = StyleSheet.create({ container: { flex: 1, backgroundColor: '#f8fafc' } });
 export default App;

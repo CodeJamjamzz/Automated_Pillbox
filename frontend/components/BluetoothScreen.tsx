@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Platform, PermissionsAndroid, Alert } from 'react-native';
 import { Bluetooth, RefreshCw, Cpu, ChevronRight, MapPin } from 'lucide-react-native';
 import {bleManager} from '@/app/utils/BleService'
-import {useNavigation} from "@react-navigation/native"
 import {Device} from "react-native-ble-plx";
 
 // --- IMPORTS ---
@@ -18,7 +17,6 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
   const [isScanning, setIsScanning] = useState(true);
   const [devices, setDevices] = useState<Device[]>([]);
   const foundDeviceIds = useRef<Set<string>>(new Set());
-  const navigation = useNavigation<any>();
 
   // Modal State
   const [isLocateModalVisible, setLocateModalVisible] = useState(false);
@@ -104,7 +102,6 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
       setSelectedDevice(connectedDevice);
 
       // C. Open Wi-Fi Modal
-      // NOTE: We do NOT navigate here anymore. We wait for the modal to finish.
       setWifiModalVisible(true);
 
     } catch (error) {
@@ -208,14 +205,8 @@ const BluetoothScreen: React.FC<BluetoothScreenProps> = ({ onConnect }) => {
               setWifiModalVisible(false);
 
               if (selectedDevice) {
-                // 1. Notify parent prop
+                // Trigger the callback to swap to the Dashboard phase in index.tsx!
                 onConnect(selectedDevice);
-
-                // 2. Navigate to Dashboard ONLY after successful Wi-Fi setup
-                // This ensures the device object is still "alive" during the modal interaction
-                navigation.navigate('Dashboard', {
-                  connectedDevice: selectedDevice
-                });
               }
             }}
         />
