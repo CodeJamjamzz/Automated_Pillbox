@@ -1,567 +1,3 @@
-// import React, { useState } from 'react';
-// import {
-//   View,
-//   Text,
-//   StyleSheet,
-//   TouchableOpacity,
-//   TextInput,
-//   ScrollView,
-//   KeyboardAvoidingView,
-//   Platform,
-//   Modal,
-//   SafeAreaView,
-//   Switch,
-//   Alert
-// } from 'react-native';
-// import {
-//   X,
-//   Clock,
-//   Calendar,
-//   ChevronRight,
-//   Check,
-//   Plus,
-//   Minus,
-//   Activity,
-//   ArrowLeft
-// } from 'lucide-react-native';
-// import DateTimePicker from '@react-native-community/datetimepicker';
-// import axios from 'axios';
-//
-// // --- TYPES (Mocked for context if file is missing) ---
-// interface Partition {
-//   id: number;
-//   label: string;
-//   medicineName: string;
-//   pillCount: number;
-//   color_code: number;
-//   duration_days?: number;
-//   dosage?: string;
-//   start_date?: string;
-//   start_time?: string;
-//   schedule?: string[];
-// }
-//
-// interface PartitionConfigProps {
-//   partition: Partition;
-//   onSave: (data: any) => void;
-//   onClose: () => void;
-// }
-//
-// // --- CONSTANTS ---
-// const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899']; // Red, Orange, Yellow, Green, Blue, Purple, Pink
-//
-// const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, onClose }) => {
-//   const isEditMode = partition.label !== 'Unassigned';
-//
-//   // --- STATE MANAGEMENT ---
-//   const [loading, setLoading] = useState(false);
-//   const [error, setError] = useState<string | null>(null);
-//
-//   // Form Data
-//   const [medName, setMedName] = useState(isEditMode ? partition.medicineName : '');
-//   const [pillCount, setPillCount] = useState(partition.pillCount || 1);
-//   const [selectedColorIdx, setSelectedColorIdx] = useState(partition.color_code || 4);
-//   const [dosage, setDosage] = useState(partition.dosage || '10mg');
-//
-//   // Schedule Logic
-//   const [isWizardVisible, setWizardVisible] = useState(false);
-//   const [wizardStep, setWizardStep] = useState<1 | 2>(1);
-//
-//   // Wizard State
-//   const [prescriptionType, setPrescriptionType] = useState<'temporary' | 'maintenance'>(
-//     partition.duration_days && partition.duration_days < 365 ? 'temporary' : 'maintenance'
-//   );
-//   const [tempDurationStr, setTempDurationStr] = useState(String(partition.duration_days || '7'));
-//   const [timesPerDay, setTimesPerDay] = useState(1);
-//   const [startDate, setStartDate] = useState(new Date());
-//   const [firstDoseTime, setFirstDoseTime] = useState(new Date());
-//
-//   // Picker State
-//   const [showPicker, setShowPicker] = useState(false);
-//   const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
-//
-//   // --- HELPERS ---
-//   const handleDateChange = (event: any, selectedDate?: Date) => {
-//     if (Platform.OS === 'android') setShowPicker(false);
-//     if (!selectedDate) return;
-//
-//     if (pickerMode === 'date') setStartDate(selectedDate);
-//     else setFirstDoseTime(selectedDate);
-//   };
-//
-//   const showDatePicker = (mode: 'date' | 'time') => {
-//     setPickerMode(mode);
-//     setShowPicker(true);
-//   };
-//
-//   const handleSaveWrapper = async () => {
-//     if (!medName.trim()) {
-//       setError("Medicine Name is required.");
-//       return;
-//     }
-//
-//     setLoading(true);
-//     setError(null);
-//
-//     try {
-//       // 1. Calculate Schedule
-//       const duration = prescriptionType === 'maintenance' ? 365 : parseInt(tempDurationStr) || 7;
-//       const intervalHours = 16 / Math.max(timesPerDay, 1);
-//
-//       // Generate specific time strings
-//       const generatedTimes: string[] = [];
-//       for (let i = 0; i < timesPerDay; i++) {
-//         const d = new Date(firstDoseTime);
-//         d.setHours(d.getHours() + (i * intervalHours));
-//         generatedTimes.push(d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
-//       }
-//
-//       // 2. Prepare Payload
-//       const payload = {
-//         slotId: partition.id,
-//         pillName: medName,
-//         pillAmount: pillCount,
-//         startTime: generatedTimes[0],
-//         durationDays: duration,
-//         dosage: dosage,
-//         startDate: startDate.toISOString().split('T')[0],
-//         intervalHours: intervalHours,
-//         calculatedTimes: generatedTimes.join(",")
-//       };
-//
-//       // 3. API Call (Mocked for safety if backend isn't reachable in this context)
-//       // await axios.put(`https://192.168.1.192:8080/api/schedule/update/${partition.id}`, payload);
-//
-//       // Simulate network delay for UX
-//       await new Promise(r => setTimeout(r, 800));
-//
-//       // 4. Update Parent
-//       onSave({
-//         ...partition,
-//         label: medName,
-//         medicineName: medName,
-//         pillCount: pillCount,
-//         color_code: selectedColorIdx,
-//         duration_days: duration,
-//         dosage: dosage,
-//         schedule: generatedTimes,
-//         start_date: payload.startDate,
-//         start_time: payload.startTime
-//       });
-//       onClose();
-//
-//     } catch (err) {
-//       setError("Failed to sync. Please check connection.");
-//       console.error(err);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-//
-//   // --- RENDERERS ---
-//
-//   // Render the Date/Time Picker Modal/Inline
-//   const renderPicker = () => {
-//     if (!showPicker) return null;
-//     return (
-//       <DateTimePicker
-//         value={pickerMode === 'date' ? startDate : firstDoseTime}
-//         mode={pickerMode}
-//         display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-//         onChange={handleDateChange}
-//         minimumDate={new Date()}
-//       />
-//     );
-//   };
-//
-//   // Wizard Step 1: Type Selection
-//   const renderWizardStep1 = () => (
-//     <View style={styles.wizContent}>
-//       <Text style={styles.wizHeader}>How long do you need this?</Text>
-//
-//       <TouchableOpacity
-//         onPress={() => setPrescriptionType('temporary')}
-//         style={[styles.typeCard, prescriptionType === 'temporary' && styles.typeCardActive]}
-//       >
-//         <View style={[styles.iconCircle, { backgroundColor: '#e0f2fe' }]}>
-//           <Clock size={24} color="#0ea5e9" />
-//         </View>
-//         <View style={styles.typeTextContainer}>
-//           <Text style={styles.typeTitle}>Temporary</Text>
-//           <Text style={styles.typeSub}>Antibiotics, Painkillers, etc.</Text>
-//         </View>
-//         {prescriptionType === 'temporary' && <Check size={20} color="#0ea5e9" />}
-//       </TouchableOpacity>
-//
-//       <TouchableOpacity
-//         onPress={() => setPrescriptionType('maintenance')}
-//         style={[styles.typeCard, prescriptionType === 'maintenance' && styles.typeCardActive]}
-//       >
-//         <View style={[styles.iconCircle, { backgroundColor: '#dcfce7' }]}>
-//           <Calendar size={24} color="#22c55e" />
-//         </View>
-//         <View style={styles.typeTextContainer}>
-//           <Text style={styles.typeTitle}>Maintenance</Text>
-//           <Text style={styles.typeSub}>Daily Vitamins, Heart Meds</Text>
-//         </View>
-//         {prescriptionType === 'maintenance' && <Check size={20} color="#22c55e" />}
-//       </TouchableOpacity>
-//
-//       <TouchableOpacity style={styles.btnPrimary} onPress={() => setWizardStep(2)}>
-//         <Text style={styles.btnText}>Next Step</Text>
-//         <ChevronRight color="#fff" size={20} />
-//       </TouchableOpacity>
-//     </View>
-//   );
-//
-//   // Wizard Step 2: Details
-//   const renderWizardStep2 = () => (
-//     <ScrollView contentContainerStyle={styles.wizScroll}>
-//       <Text style={styles.wizHeader}>Schedule Details</Text>
-//
-//       {/* Duration (Only for Temporary) */}
-//       {prescriptionType === 'temporary' && (
-//         <View style={styles.inputSection}>
-//           <Text style={styles.inputLabel}>DURATION (DAYS)</Text>
-//           <TextInput
-//             style={styles.input}
-//             value={tempDurationStr}
-//             onChangeText={setTempDurationStr}
-//             keyboardType="numeric"
-//             placeholder="7"
-//           />
-//         </View>
-//       )}
-//
-//       {/* Start Date */}
-//       <View style={styles.inputSection}>
-//         <Text style={styles.inputLabel}>START DATE</Text>
-//         <TouchableOpacity style={styles.pickerBtn} onPress={() => showDatePicker('date')}>
-//           <Calendar size={20} color="#64748b" />
-//           <Text style={styles.pickerText}>{startDate.toDateString()}</Text>
-//         </TouchableOpacity>
-//       </View>
-//
-//       {/* Times Per Day */}
-//       <View style={styles.inputSection}>
-//         <Text style={styles.inputLabel}>TIMES PER DAY</Text>
-//         <View style={styles.pillCounter}>
-//           <TouchableOpacity onPress={() => setTimesPerDay(Math.max(1, timesPerDay - 1))} style={styles.counterBtn}>
-//             <Minus size={20} color="#334155" />
-//           </TouchableOpacity>
-//           <Text style={styles.counterText}>{timesPerDay}</Text>
-//           <TouchableOpacity onPress={() => setTimesPerDay(Math.min(6, timesPerDay + 1))} style={styles.counterBtn}>
-//             <Plus size={20} color="#334155" />
-//           </TouchableOpacity>
-//         </View>
-//       </View>
-//
-//       {/* First Dose */}
-//       <View style={styles.inputSection}>
-//         <Text style={styles.inputLabel}>FIRST DOSE TIME</Text>
-//         <TouchableOpacity style={styles.pickerBtn} onPress={() => showDatePicker('time')}>
-//           <Clock size={20} color="#64748b" />
-//           <Text style={styles.pickerText}>
-//             {firstDoseTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-//           </Text>
-//         </TouchableOpacity>
-//       </View>
-//
-//       {/* Platform specific picker rendering */}
-//       {Platform.OS === 'ios' && showPicker && (
-//          <View style={styles.iosPickerContainer}>
-//             {renderPicker()}
-//             <TouchableOpacity style={styles.iosPickerDone} onPress={() => setShowPicker(false)}>
-//               <Text style={{color: '#2563eb', fontWeight:'600'}}>Done</Text>
-//             </TouchableOpacity>
-//          </View>
-//       )}
-//
-//       <View style={{ height: 20 }} />
-//
-//       <TouchableOpacity style={styles.btnPrimary} onPress={() => setWizardVisible(false)}>
-//         <Text style={styles.btnText}>Confirm Schedule</Text>
-//         <Check color="#fff" size={20} />
-//       </TouchableOpacity>
-//     </ScrollView>
-//   );
-//
-//   return (
-//     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-//
-//       {/* HEADER */}
-//       <SafeAreaView style={styles.headerArea}>
-//         <View style={styles.header}>
-//           <View>
-//             <Text style={styles.headerTitle}>{isEditMode ? 'Edit Medication' : 'New Setup'}</Text>
-//             <Text style={styles.headerSubtitle}>Slot #{partition.id}</Text>
-//           </View>
-//           <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-//             <X size={24} color="#64748b" />
-//           </TouchableOpacity>
-//         </View>
-//       </SafeAreaView>
-//
-//       <ScrollView contentContainerStyle={styles.content}>
-//         {error && (
-//           <View style={styles.errorBanner}>
-//             <Activity size={20} color="#dc2626" />
-//             <Text style={styles.errorText}>{error}</Text>
-//           </View>
-//         )}
-//
-//         {/* 1. MEDICINE INFO */}
-//         <View style={styles.section}>
-//           <Text style={styles.sectionTitle}>MEDICINE DETAILS</Text>
-//           <TextInput
-//             style={styles.mainInput}
-//             value={medName}
-//             onChangeText={setMedName}
-//             placeholder="Medication Name (e.g. Ibuprofen)"
-//             placeholderTextColor="#94a3b8"
-//           />
-//            <TextInput
-//             style={[styles.mainInput, {marginTop: 12}]}
-//             value={dosage}
-//             onChangeText={setDosage}
-//             placeholder="Dosage (e.g. 500mg)"
-//             placeholderTextColor="#94a3b8"
-//           />
-//         </View>
-//
-//         {/* 2. PILL COUNT & COLOR */}
-//         <View style={styles.row}>
-//           <View style={[styles.section, { flex: 1, marginRight: 10 }]}>
-//             <Text style={styles.sectionTitle}>REFILL COUNT</Text>
-//             <View style={styles.pillCounter}>
-//               <TouchableOpacity onPress={() => setPillCount(Math.max(1, pillCount - 1))} style={styles.counterBtn}>
-//                 <Minus size={20} color="#334155" />
-//               </TouchableOpacity>
-//               <Text style={styles.counterText}>{pillCount}</Text>
-//               <TouchableOpacity onPress={() => setPillCount(pillCount + 1)} style={styles.counterBtn}>
-//                 <Plus size={20} color="#334155" />
-//               </TouchableOpacity>
-//             </View>
-//           </View>
-//         </View>
-//
-//         <View style={styles.section}>
-//             <Text style={styles.sectionTitle}>LED COLOR INDICATOR</Text>
-//             <View style={styles.colorRow}>
-//               {COLORS.map((c, idx) => (
-//                 <TouchableOpacity
-//                   key={c}
-//                   onPress={() => setSelectedColorIdx(idx)}
-//                   style={[
-//                     styles.colorCircle,
-//                     { backgroundColor: c },
-//                     selectedColorIdx === idx && styles.colorCircleActive
-//                   ]}
-//                 >
-//                   {selectedColorIdx === idx && <Check size={16} color="#fff" strokeWidth={3} />}
-//                 </TouchableOpacity>
-//               ))}
-//             </View>
-//         </View>
-//
-//         {/* 3. SCHEDULE SUMMARY CARD */}
-//         <View style={styles.section}>
-//           <Text style={styles.sectionTitle}>SCHEDULE</Text>
-//           <TouchableOpacity style={styles.scheduleCard} onPress={() => {
-//             setWizardVisible(true);
-//             setWizardStep(1);
-//           }}>
-//             <View style={styles.scheduleInfo}>
-//               <View style={styles.scheduleRow}>
-//                 <Clock size={16} color="#64748b" />
-//                 <Text style={styles.scheduleText}>
-//                   {timesPerDay} time{timesPerDay > 1 ? 's' : ''} per day
-//                 </Text>
-//               </View>
-//               <View style={styles.scheduleRow}>
-//                 <Calendar size={16} color="#64748b" />
-//                 <Text style={styles.scheduleText}>
-//                   Starts {startDate.toLocaleDateString()}
-//                 </Text>
-//               </View>
-//             </View>
-//             <View style={styles.editBadge}>
-//               <Text style={styles.editBadgeText}>Configure</Text>
-//               <ChevronRight size={16} color="#2563eb" />
-//             </View>
-//           </TouchableOpacity>
-//         </View>
-//
-//         <View style={{ height: 40 }} />
-//       </ScrollView>
-//
-//       {/* FOOTER SAVE BUTTON */}
-//       <View style={styles.footer}>
-//         <TouchableOpacity
-//           style={[styles.saveBtn, loading && styles.saveBtnDisabled]}
-//           onPress={handleSaveWrapper}
-//           disabled={loading}
-//         >
-//           {loading ? (
-//              <Activity color="#fff" />
-//           ) : (
-//             <>
-//               <Text style={styles.saveBtnText}>Save Medication</Text>
-//               <Check color="#fff" size={20} />
-//             </>
-//           )}
-//         </TouchableOpacity>
-//       </View>
-//
-//       {/* --- WIZARD MODAL --- */}
-//       <Modal visible={isWizardVisible} animationType="slide" presentationStyle="pageSheet">
-//         <SafeAreaView style={styles.modalSafe}>
-//           <View style={styles.modalHeader}>
-//             <TouchableOpacity onPress={() => {
-//               if(wizardStep === 2) setWizardStep(1);
-//               else setWizardVisible(false);
-//             }}>
-//               {wizardStep === 2 ? <ArrowLeft size={24} color="#0f172a" /> : <X size={24} color="#0f172a" />}
-//             </TouchableOpacity>
-//             <Text style={styles.modalTitle}>Step {wizardStep} of 2</Text>
-//             <View style={{ width: 24 }} />
-//           </View>
-//
-//           <View style={styles.modalBody}>
-//             {wizardStep === 1 ? renderWizardStep1() : renderWizardStep2()}
-//           </View>
-//
-//           {/* Android Picker needs to be outside the render logic to float properly if modal used */}
-//           {Platform.OS === 'android' && renderPicker()}
-//         </SafeAreaView>
-//       </Modal>
-//
-//     </KeyboardAvoidingView>
-//   );
-// };
-//
-// const styles = StyleSheet.create({
-//   // Main Container
-//   container: { flex: 1, backgroundColor: '#f8fafc' },
-//   headerArea: { backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#f1f5f9' },
-//   header: { padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-//   headerTitle: { fontSize: 20, fontWeight: '800', color: '#0f172a' },
-//   headerSubtitle: { fontSize: 14, color: '#64748b', fontWeight: '500' },
-//   closeBtn: { padding: 8, backgroundColor: '#f1f5f9', borderRadius: 50 },
-//
-//   content: { padding: 20 },
-//
-//   // Sections
-//   section: { marginBottom: 24 },
-//   sectionTitle: { fontSize: 12, fontWeight: '700', color: '#94a3b8', marginBottom: 8, letterSpacing: 0.5 },
-//   row: { flexDirection: 'row' },
-//
-//   // Inputs
-//   mainInput: {
-//     backgroundColor: '#fff',
-//     borderWidth: 1,
-//     borderColor: '#e2e8f0',
-//     borderRadius: 16,
-//     padding: 16,
-//     fontSize: 16,
-//     color: '#0f172a',
-//     shadowColor: '#64748b',
-//     shadowOffset: { width: 0, height: 2 },
-//     shadowOpacity: 0.05,
-//     shadowRadius: 4,
-//     elevation: 2
-//   },
-//
-//   // Pill Counter
-//   pillCounter: {
-//     flexDirection: 'row',
-//     alignItems: 'center',
-//     backgroundColor: '#fff',
-//     borderRadius: 12,
-//     borderWidth: 1,
-//     borderColor: '#e2e8f0',
-//     padding: 4,
-//     justifyContent: 'space-between'
-//   },
-//   counterBtn: { padding: 12, backgroundColor: '#f1f5f9', borderRadius: 8 },
-//   counterText: { fontSize: 18, fontWeight: 'bold', width: 40, textAlign: 'center' },
-//
-//   // Colors
-//   colorRow: { flexDirection: 'row', justifyContent: 'space-between' },
-//   colorCircle: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-//   colorCircleActive: { borderWidth: 3, borderColor: '#fff', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 4, elevation: 3 },
-//
-//   // Schedule Card
-//   scheduleCard: {
-//     backgroundColor: '#fff',
-//     padding: 16,
-//     borderRadius: 16,
-//     borderWidth: 1,
-//     borderColor: '#e2e8f0',
-//     flexDirection: 'row',
-//     justifyContent: 'space-between',
-//     alignItems: 'center'
-//   },
-//   scheduleInfo: { gap: 8 },
-//   scheduleRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-//   scheduleText: { color: '#334155', fontWeight: '500' },
-//   editBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eff6ff', padding: 8, borderRadius: 8 },
-//   editBadgeText: { color: '#2563eb', fontWeight: '700', fontSize: 12, marginRight: 4 },
-//
-//   // Footer
-//   footer: { padding: 20, backgroundColor: '#fff', borderTopWidth: 1, borderColor: '#f1f5f9' },
-//   saveBtn: {
-//     backgroundColor: '#2563eb',
-//     padding: 18,
-//     borderRadius: 16,
-//     flexDirection: 'row',
-//     justifyContent: 'center',
-//     alignItems: 'center',
-//     gap: 12,
-//     shadowColor: '#2563eb',
-//     shadowOffset: { width: 0, height: 4 },
-//     shadowOpacity: 0.3,
-//     shadowRadius: 8,
-//     elevation: 4
-//   },
-//   saveBtnDisabled: { backgroundColor: '#94a3b8' },
-//   saveBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-//
-//   // Error
-//   errorBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fef2f2', padding: 12, borderRadius: 12, marginBottom: 16, gap: 8 },
-//   errorText: { color: '#dc2626', fontWeight: '600' },
-//
-//   // WIZARD STYLES
-//   modalSafe: { flex: 1, backgroundColor: '#fff' },
-//   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderColor: '#f1f5f9', alignItems: 'center' },
-//   modalTitle: { fontWeight: '700', fontSize: 16 },
-//   modalBody: { flex: 1, padding: 20 },
-//   wizContent: { flex: 1, gap: 16 },
-//   wizScroll: { paddingBottom: 40 },
-//   wizHeader: { fontSize: 24, fontWeight: '800', color: '#0f172a', marginBottom: 20 },
-//
-//   typeCard: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', gap: 16, marginBottom: 12 },
-//   typeCardActive: { borderColor: '#3b82f6', backgroundColor: '#f8fafc', borderWidth: 2 },
-//   iconCircle: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-//   typeTextContainer: { flex: 1 },
-//   typeTitle: { fontWeight: '700', fontSize: 16, color: '#0f172a' },
-//   typeSub: { color: '#64748b', fontSize: 13 },
-//
-//   btnPrimary: { backgroundColor: '#0f172a', padding: 18, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 'auto' },
-//   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-//
-//   inputSection: { marginBottom: 20 },
-//   inputLabel: { fontSize: 12, fontWeight: '700', color: '#94a3b8', marginBottom: 8 },
-//   input: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 16, fontSize: 16 },
-//   pickerBtn: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
-//   pickerText: { fontSize: 16, color: '#0f172a' },
-//
-//   iosPickerContainer: { backgroundColor: '#f1f5f9', borderRadius: 12, overflow: 'hidden', marginTop: 10 },
-//   iosPickerDone: { alignItems: 'flex-end', padding: 12, backgroundColor: '#e2e8f0' }
-// });
-//
-// export default PartitionConfig;
-
 import React, { useState } from 'react';
 import {
   View,
@@ -673,7 +109,7 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
 
   const toggleDay = (index: number) => {
     if (selectedDays.includes(index)) {
-      if (selectedDays.length > 1) { // Prevent deselecting all days
+      if (selectedDays.length > 1) { 
         setSelectedDays(selectedDays.filter(d => d !== index));
       } else {
         Alert.alert("Invalid Selection", "You must select at least one day.");
@@ -686,6 +122,43 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
   const confirmScheduleConfig = () => {
     setIsScheduleConfigured(true);
     setScheduleModalVisible(false);
+  };
+
+  // --- REMOVE MEDICATION HANDLER ---
+  const handleRemove = () => {
+    Alert.alert(
+      "Remove Medication",
+      "Are you sure you want to delete this medication? This will clear the slot and delete its schedule.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive", // Makes the button red on iOS
+          onPress: () => {
+            setLoading(true);
+            
+            // Create a completely empty payload to overwrite the database
+            const emptyPayload = {
+              ...partition,
+              label: 'Unassigned',
+              medicineName: '',
+              illness: '',
+              pillCount: 0,
+              dosage: '',
+              start_date: '',
+              start_time: '',
+              schedule: [],
+              timesPerDay: 1,
+              selectedDays: [0, 1, 2, 3, 4, 5, 6],
+              duration_days: 0,
+            };
+
+            onSave(emptyPayload);
+            onClose();
+          }
+        }
+      ]
+    );
   };
 
   const handleFinalSave = async () => {
@@ -701,7 +174,6 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
     setLoading(true);
 
     try {
-      // Calculate the interval (e.g., 24 / 3 times a day = 8 hour interval)
       const intervalHours = Math.floor(24 / Math.max(timesPerDay, 1));
       const generatedTimes: string[] = [];
       
@@ -709,20 +181,15 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
       const startMinute = firstDoseTime.getMinutes();
 
       for (let i = 0; i < timesPerDay; i++) {
-        // Add interval, and use modulo (%) 24 to wrap around midnight (e.g., 26:00 becomes 02:00)
         let calcHour = (startHour + (intervalHours * i)) % 24;
-        
-        // Ensure 2-digit military time formatting
         let formattedHour = calcHour.toString().padStart(2, '0');
         let formattedMinute = startMinute.toString().padStart(2, '0');
-        
         generatedTimes.push(`${formattedHour}:${formattedMinute}`);
       }
 
       const formattedStartDate = startDate.toISOString().split('T')[0];
       const formattedStartTime = firstDoseTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-      // Generate the payload for the UI and parent component
       const uiPayload = {
         ...partition,
         label: medName,
@@ -731,10 +198,10 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
         pillCount: pillCount,
         dosage: dosage,
         start_date: formattedStartDate,
-        start_time: formattedStartTime, // FIRST DOSE TIME
+        start_time: formattedStartTime, 
         schedule: generatedTimes,
         timesPerDay: timesPerDay,
-        selectedDays: selectedDays, // SCHEDULE TYPE
+        selectedDays: selectedDays, 
         duration_days: 365,
       };
 
@@ -758,8 +225,8 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
         display={Platform.OS === 'ios' ? 'spinner' : 'default'}
         onChange={handleDateChange}
         minimumDate={new Date()}
-        textColor="#0f172a"    // Forces the text to be dark slate
-        themeVariant="light"   // Forces the iOS picker to use the light mode style
+        textColor="#0f172a"
+        themeVariant="light"
       />
     );
   };
@@ -842,6 +309,13 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
         <TouchableOpacity style={[styles.finalSaveBtn, pillCount === 0 && styles.finalSaveBtnDisabled]} onPress={handleFinalSave} disabled={loading}>
             {loading ? <Text style={styles.finalSaveText}>SAVING...</Text> : <Text style={styles.finalSaveText}>SAVE CHANGES</Text>}
         </TouchableOpacity>
+
+        {/* --- NEW REMOVE BUTTON --- Only shows if the slot is currently occupied */}
+        {isEditMode && (
+          <TouchableOpacity style={styles.removeBtn} onPress={handleRemove} disabled={loading}>
+            <Text style={styles.removeBtnText}>REMOVE MEDICATION</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* --- MAINTENANCE SCHEDULE MODAL --- */}
@@ -960,6 +434,11 @@ const styles = StyleSheet.create({
   finalSaveBtn: { backgroundColor: '#2563eb', borderRadius: 14, height: 56, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', shadowColor: '#2563eb', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
   finalSaveBtnDisabled: { backgroundColor: '#94a3b8' },
   finalSaveText: { color: '#fff', fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
+  
+  // --- NEW REMOVE BUTTON STYLES ---
+  removeBtn: { marginTop: 16, alignItems: 'center', paddingVertical: 12 },
+  removeBtnText: { color: '#ef4444', fontWeight: 'bold', fontSize: 14, letterSpacing: 0.5 },
+
   modalContainer: { flex: 1, backgroundColor: '#f8fafc', paddingTop: Platform.OS === 'android' ? 20 : 0 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#f1f5f9' },
   cancelText: { color: '#64748b', fontSize: 16 },
@@ -972,7 +451,6 @@ const styles = StyleSheet.create({
   modalInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 12, fontSize: 15, color: '#0f172a', fontWeight: '500' },
   modalInputValue: { fontSize: 15, color: '#0f172a' },
 
-  // --- NEW DAY SELECTOR STYLES ---
   daysRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   dayCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e2e8f0' },
   dayCircleActive: { backgroundColor: '#3b82f6', borderColor: '#2563eb' },

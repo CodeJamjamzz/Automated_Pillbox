@@ -2,8 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { Clock, PlusCircle } from 'lucide-react-native';
 
-// 1. Import the Partition interface from your type.ts file
-// Note: Ensure the path points to where type.ts is located (e.g., '../type' or '../../type')
+// 1. Import the Partition interface
 import { Partition } from '../types';
 
 const { width } = Dimensions.get('window');
@@ -18,28 +17,17 @@ interface DeviceLayoutProps {
 // 3. Apply the interface to the component definition
 const DeviceLayout: React.FC<DeviceLayoutProps> = ({ partitions, onPartitionSelect }) => {
 
-    // Helper: Calculate next dose time string (typed schedule as string[])
-    const getNextDoseText = (schedule: string[]) => {
-        if (!schedule || schedule.length === 0) return '--:--';
-        const now = new Date();
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    // Helper: Convert array of military times ["18:30", "02:30"] into "6:30 PM • 2:30 AM"
+    const formatAlarmTimes = (schedule: string[]) => {
+        if (!schedule || schedule.length === 0) return 'No Alarms Set';
 
-        const timesInMinutes = schedule.map(isoString => {
-            const d = new Date(isoString);
-            if (isNaN(d.getTime())) return -1;
-            return d.getHours() * 60 + d.getMinutes();
-        }).filter(t => t !== -1).sort((a, b) => a - b);
-
-        if (timesInMinutes.length === 0) return '--:--';
-        const nextTime = timesInMinutes.find(t => t > currentMinutes) ?? timesInMinutes[0];
-
-        const h = Math.floor(nextTime / 60);
-        const m = nextTime % 60;
-        const displayDate = new Date();
-        displayDate.setHours(h);
-        displayDate.setMinutes(m);
-
-        return displayDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+        return schedule.map(timeStr => {
+            const [h, m] = timeStr.split(':');
+            const hour = parseInt(h, 10);
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            const hour12 = hour % 12 || 12;
+            return `${hour12}:${m} ${ampm}`;
+        }).join(' • '); // Bullet point separator for a clean UI look
     };
 
     return (
@@ -48,7 +36,9 @@ const DeviceLayout: React.FC<DeviceLayoutProps> = ({ partitions, onPartitionSele
             <View style={styles.grid}>
                 {partitions.map((partition) => {
                     const isUnassigned = !partition.label || partition.label === 'Unassigned';
-                    const activeColor = isUnassigned ? '#cbd5e1' : (partition.colorTheme || '#2563eb');
+                    
+                    // Standard blue for active slots, gray for empty ones (since color picker is removed)
+                    const activeColor = isUnassigned ? '#cbd5e1' : '#2563eb';
 
                     return (
                         <TouchableOpacity
@@ -83,9 +73,10 @@ const DeviceLayout: React.FC<DeviceLayoutProps> = ({ partitions, onPartitionSele
                                             <Text style={[styles.pillLabel, { color: activeColor }]}>PILLS LEFT</Text>
                                         </View>
                                         <View style={[styles.scheduleBadge, { borderColor: activeColor + '40', backgroundColor: activeColor + '10' }]}>
-                                            <Clock size={10} stroke={activeColor} />
-                                            <Text style={[styles.scheduleText, { color: activeColor }]}>
-                                                {getNextDoseText(partition.schedule)}
+                                            <Clock size={10} stroke={activeColor} style={{ marginTop: 1 }} />
+                                            {/* numberOfLines={2} allows long schedules to wrap neatly */}
+                                            <Text style={[styles.scheduleText, { color: activeColor }]} numberOfLines={2}>
+                                                {formatAlarmTimes(partition.schedule)}
                                             </Text>
                                         </View>
                                     </>
@@ -122,8 +113,8 @@ const styles = StyleSheet.create({
     pillCountContainer: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
     pillCount: { fontSize: 20, fontWeight: '900' },
     pillLabel: { fontSize: 8, fontWeight: '900' },
-    scheduleBadge: { flexDirection: 'row', alignItems: 'center', padding: 4, borderRadius: 8, gap: 4, borderWidth: 1 },
-    scheduleText: { fontSize: 10, fontWeight: '900' },
+    scheduleBadge: { flexDirection: 'row', alignItems: 'flex-start', padding: 6, borderRadius: 8, gap: 4, borderWidth: 1 },
+    scheduleText: { fontSize: 10, fontWeight: '800', flexShrink: 1, lineHeight: 14 },
     setupContainer: { alignItems: 'center', justifyContent: 'center', opacity: 0.4, gap: 4 },
     setupText: { fontSize: 10, fontWeight: '900', color: '#94a3b8' },
 });
