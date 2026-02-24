@@ -4,7 +4,6 @@ import { Battery, Bluetooth, Smartphone, Box, X } from 'lucide-react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
-import { Audio } from 'expo-av';
 import { Base64 } from 'js-base64';
 import { useRoute } from '@react-navigation/native';
 import { Device } from 'react-native-ble-plx';
@@ -13,12 +12,10 @@ import { bleManager } from '@/app/utils/BleService';
 // --- SUB COMPONENTS ---
 import DeviceLayout from '../DeviceLayout';
 import DailySchedule from '../DailySchedule';
-// import LocationTracker from '../LocationTracker';
 
 // --- IMPORTS ---
 import { PatientRecord, Partition } from '../../types';
 import PartitionConfig from './PartitionConfig';
-import AlarmModal from './AlarmModal';
 import { registerForNotifications } from '@/app/utils/NotificationService';
 
 // --- FIREBASE RTDB IMPORTS ---
@@ -32,32 +29,32 @@ const INITIAL_PATIENT_DATA: PatientRecord = {
   age: 68,
   partitions: [
     {
-      id: 1, color_code: 0, dosage: "0", duration_days: 0,
+      id: 1, dosage: "0", duration_days: 0,
       start_date: new Date().toISOString().split("T")[0],
       start_time: new Date().toTimeString().slice(0, 5),
       label: 'Unassigned', medicineName: '', pillCount: 0,
-      schedule: [], isBlinking: false, adherenceRate: 0, history: []
+      schedule: [], selectedDays: [0,1,2,3,4,5,6], isBlinking: false, adherenceRate: 0, history: []
     },
     {
-      id: 2, color_code: 0, dosage: "0", duration_days: 0,
+      id: 2, dosage: "0", duration_days: 0,
       start_date: new Date().toISOString().split("T")[0],
       start_time: new Date().toTimeString().slice(0, 5),
       label: 'Unassigned', medicineName: '', pillCount: 0,
-      schedule: [], isBlinking: false, adherenceRate: 0, history: []
+      schedule: [], selectedDays: [0,1,2,3,4,5,6], isBlinking: false, adherenceRate: 0, history: []
     },
     {
-      id: 3, color_code: 0, dosage: "0", duration_days: 0,
+      id: 3, dosage: "0", duration_days: 0,
       start_date: new Date().toISOString().split("T")[0],
       start_time: new Date().toTimeString().slice(0, 5),
       label: 'Unassigned', medicineName: '', pillCount: 0,
-      schedule: [], isBlinking: false, adherenceRate: 0, history: []
+      schedule: [], selectedDays: [0,1,2,3,4,5,6], isBlinking: false, adherenceRate: 0, history: []
     },
     {
-      id: 4, color_code: 0, dosage: "0", duration_days: 0,
+      id: 4, dosage: "0", duration_days: 0,
       start_date: new Date().toISOString().split("T")[0],
       start_time: new Date().toTimeString().slice(0, 5),
       label: 'Unassigned', medicineName: '', pillCount: 0,
-      schedule: [], isBlinking: false, adherenceRate: 0, history: []
+      schedule: [], selectedDays: [0,1,2,3,4,5,6], isBlinking: false, adherenceRate: 0, history: []
     },
   ],
   lastLocation: { lat: 10.3157, lng: 123.8854 }, // Centered on Cebu City
@@ -80,17 +77,14 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   const [patient, setPatient] = useState<PatientRecord>(props.patient || INITIAL_PATIENT_DATA);
   const [configPartition, setConfigPartition] = useState<Partition | null>(null);
 
-  // --- ADD THIS NEW BLOCK RIGHT HERE ---
   // This forces the Dashboard to instantly update whenever Firebase sends new data!
   useEffect(() => {
     if (props.patient) {
       setPatient(props.patient);
     }
   }, [props.patient]);
-  // -------------------------------------
   
-  // --- ALARM & TIME STATE ---
-  const [activeAlarmPartition, setActiveAlarmPartition] = useState<Partition | null>(null);
+  // --- TIME STATE ---
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // --- MAP / TRACKING STATE ---
@@ -102,33 +96,25 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   const isNewDevice = patient.partitions.every(p => !p.label || p.label === 'Unassigned');
 
   // --- 1. GET DEVICE FROM NAVIGATION PARAMS ---
-  // This object might be "hollow" (missing methods)
   const { connectedDevice } = (route.params as { connectedDevice?: Device }) || {};
 
   // --- 2. CREATE THE STATE VARIABLE ---
-  // This 'device' variable is the one you will use everywhere else
   const [device, setDevice] = useState<Device | null>(connectedDevice || null);
 
-  // --- 3. REHYDRATE THE DEVICE (CRITICAL) ---
+  // --- 3. REHYDRATE THE DEVICE ---
   useEffect(() => {
     const fetchLiveDevice = async () => {
       if (connectedDevice?.id) {
         try {
-          // A. Ask the BLE Manager for currently connected devices
-          // (You must provide the Service UUID to filter)
           const devices = await bleManager.connectedDevices(["6E400001-B5A3-F393-E0A9-E50E24DCCA9E"]);
-
-          // B. Find the one that matches our ID
           const liveDevice = devices.find(d => d.id === connectedDevice.id);
 
           if (liveDevice) {
-            // C. Refresh services to ensure it's ready to talk
             await liveDevice.discoverAllServicesAndCharacteristics();
-            setDevice(liveDevice); // Update state with the fully functional object
+            setDevice(liveDevice); 
             console.log("Device rehydrated successfully:", liveDevice.id);
           } else {
             console.log("Device not found in connected list. Attempting reconnect...");
-            // D. Fallback: Force a reconnect if it wasn't found
             const freshDevice = await bleManager.connectToDevice(connectedDevice.id);
             await freshDevice.discoverAllServicesAndCharacteristics();
             setDevice(freshDevice);
@@ -138,42 +124,9 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
         }
       }
     };
-
     fetchLiveDevice();
   }, [connectedDevice]);
-  const syncScheduleToHardware = async (updatedPartition: Partition) => {
-    if (!device) return;
 
-    try {
-      // 1. Format Payload: "SlotID|HH:MM,HH:MM"
-      // Hardware uses 0-3 index, App uses 1-4. So we do (id - 1)
-      let payload = `${updatedPartition.id - 1}|`;
-
-      const timeStrings = updatedPartition.schedule.map(isoStr => {
-        const d = new Date(isoStr);
-        // Format to "HH:MM" (24-hour format)
-        const hh = d.getHours().toString().padStart(2, '0');
-        const mm = d.getMinutes().toString().padStart(2, '0');
-        return `${hh}:${mm}`;
-      });
-
-      payload += timeStrings.join(',');
-
-      console.log("Syncing to Hardware:", payload);
-
-      // 2. Write to the new Schedule UUID
-      // Note: We use the raw string here, but if your ESP32 expects Base64, wrap it: Base64.encode(payload)
-      await device.writeCharacteristicWithResponseForService(
-          "6E400001-B5A3-F393-E0A9-E50E24DCCA9E", // Service
-          "6E400003-B5A3-F393-E0A9-E50E24DCCA9E", // Schedule UUID
-          Base64.encode(payload) // Encoding to be safe
-      );
-
-    } catch (e) {
-      console.error("Sync Failed:", e);
-      // Optional: Alert the user
-    }
-  };
   // --- SCHEDULE LOGIC ---
   const [takenDoses, setTakenDoses] = useState<Set<string>>(new Set());
 
@@ -223,91 +176,14 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
     if (props.onUpdate) props.onUpdate(updatedPatient);
   };
 
-  // --- 1. HEARTBEAT: CHECK TIME & UPDATE CLOCK ---
+  // --- 1. HEARTBEAT: UPDATE CLOCK FOR TIMELINE UI ---
+  // (We removed the old duplicate Alarm Logic from here!)
   useEffect(() => {
     const interval = setInterval(() => {
-      const now = new Date();
-      setCurrentTime(now);
-
-      const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
-
-      patient.partitions.forEach(p => {
-        if (p.label !== 'Unassigned' && p.schedule) {
-          p.schedule.forEach((timeStr, index) => {
-            const d = new Date(timeStr);
-            const doseId = `${p.id}-${index}`;
-
-            if (
-                d.getHours() === currentHour &&
-                d.getMinutes() === currentMinute &&
-                !takenDoses.has(doseId) &&
-                activeAlarmPartition?.id !== p.id
-            ) {
-              setActiveAlarmPartition(p);
-            }
-          });
-        }
-      });
-    }, 5000);
-
+      setCurrentTime(new Date());
+    }, 60000); 
     return () => clearInterval(interval);
-  }, [patient, takenDoses, activeAlarmPartition]);
-
-
-  // --- 2. ALARM LOGIC: TIMEOUT & SOUND ---
-  useEffect(() => {
-    let timeoutId: any;
-    let soundObject: Audio.Sound | null = null;
-
-    const playSound = async () => {
-      try {
-        const { sound } = await Audio.Sound.createAsync(
-            require('@/assets/audio/alarm.wav')
-        );
-        soundObject = sound;
-        await sound.setIsLoopingAsync(true);
-        await sound.playAsync();
-      } catch (error) {
-        console.log("Could not play alarm sound.", error);
-      }
-    };
-
-    if (activeAlarmPartition) {
-      timeoutId = setTimeout(() => setActiveAlarmPartition(null), 60000);
-      playSound();
-    }
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (soundObject) {
-        soundObject.stopAsync();
-        soundObject.unloadAsync();
-      }
-    };
-  }, [activeAlarmPartition]);
-
-
-  // --- 3. HANDLE ALARM CONFIRM ---
-  const handleAlarmConfirm = () => {
-    if (!activeAlarmPartition) return;
-    const doseToMark = todayDoses.find(d =>
-        d.partitionId === activeAlarmPartition.id && d.status === 'pending'
-    );
-    if (doseToMark) {
-      handleDoseAction(doseToMark);
-    } else {
-      const updatedPartitions = patient.partitions.map(p => {
-        if (p.id === activeAlarmPartition.id) {
-          return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
-        }
-        return p;
-      });
-      handlePatientUpdate({ ...patient, partitions: updatedPartitions });
-    }
-    setActiveAlarmPartition(null);
-  };
-
+  }, []);
 
   // --- LOCATION & NOTIFICATION ---
   const requestLocationPermission = async () => {
@@ -341,14 +217,6 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   useEffect(() => {
     requestLocationPermission();
     registerForNotifications();
-    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data;
-      if (data.screen === 'AlarmModal') {
-        const validP = patient.partitions.find(p => p.label !== 'Unassigned');
-        if(validP) setActiveAlarmPartition(validP);
-      }
-    });
-    return () => subscription.remove();
   }, []);
 
   return (
@@ -385,16 +253,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
               isNewDevice={isNewDevice}
           />
 
-          {/* COMPONENT 3: LOCATION TRACKER (Map Widget) */}
-          {/*<LocationTracker*/}
-          {/* permissionStatus={permissionStatus}*/}
-          {/* userLocation={userLocation}*/}
-          {/* kitLocation={kitLocation}*/}
-          {/* onRequestPermission={requestLocationPermission}*/}
-          {/* onShowFullMap={() => setShowFullMap(true)}*/}
-          {/*/>*/}
-
-          {/* MODAL: FULL SCREEN MAP (Kept here to overlay everything) */}
+          {/* MODAL: FULL SCREEN MAP */}
           <Modal visible={showFullMap} animationType="slide">
             <View style={styles.fullMapContainer}>
               {userLocation ? (
@@ -445,7 +304,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                 <PartitionConfig
                     partition={configPartition}
                     onSave={async (data) => {
-                      const updatedP = {...configPartition, ...data as Partition, color_code: (data as Partition).color_code ?? configPartition.color_code};
+                      const updatedP = {...configPartition, ...data as Partition};
                       
                       // 1. Optimistic UI Update
                       handlePatientUpdate({
@@ -453,32 +312,25 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                         partitions: patient.partitions.map(p => p.id === configPartition.id ? updatedP : p)
                       });
 
-                      // 2. Format times for ESP32 (e.g., "08:00,14:00")
+                      // 2. Schedule array is ALREADY formatted as ["18:30", "02:30"], just join them!
                       let timesString = "";
                       if (updatedP.schedule && updatedP.schedule.length > 0) {
-                        timesString = updatedP.schedule.map(isoStr => {
-                          const d = new Date(isoStr);
-                          return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
-                        }).join(",");
+                        timesString = updatedP.schedule.join(",");
                       }
 
-                      // 3. Push EVERYTHING to Firebase RTDB
+                      // 3. Push EVERYTHING to Firebase RTDB (Removed await import crashes)
                       try {
-                          const { ref, update } = await import("firebase/database");
-                          const { rtdb } = await import("@/app/utils/firebase");
-                          
                           const slotRef = ref(rtdb, `pillbox_001/slots/${updatedP.id}`);
                           await update(slotRef, { 
                               amount: updatedP.pillCount,
                               times: timesString,
-                              // --- ADDED NEW FIELDS HERE ---
                               medicineName: updatedP.medicineName || '',
                               illness: updatedP.illness || '',
                               dosage: updatedP.dosage || '',
-                              color_code: updatedP.color_code !== undefined ? updatedP.color_code : 4,
                               timesPerDay: updatedP.timesPerDay || 1,
                               start_date: updatedP.start_date || '',
-                              start_time: updatedP.start_time || ''
+                              start_time: updatedP.start_time || '',
+                              selectedDays: updatedP.selectedDays || [0,1,2,3,4,5,6] 
                           });
                       } catch (error) {
                           console.error("Failed to save to Firebase RTDB:", error);
@@ -490,15 +342,6 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
               </Modal>
           )}
         </ScrollView>
-
-        {/* MODAL: ALARM */}
-        {activeAlarmPartition && (
-            <AlarmModal
-                partition={activeAlarmPartition}
-                onConfirm={handleAlarmConfirm}
-                onClose={() => setActiveAlarmPartition(null)}
-            />
-        )}
       </View>
   );
 };
@@ -514,8 +357,6 @@ const styles = StyleSheet.create({
   badgeTextBlue: { fontSize: 10, fontWeight: '900', color: '#0d9488' },
   badgeGray: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f5f9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, gap: 4 },
   badgeTextGray: { fontSize: 10, fontWeight: '900', color: '#475569' },
-
-  // Full Map Styles
   fullMapContainer: { flex: 1, backgroundColor: '#000' },
   fullMap: { flex: 1 },
   legendContainer: { position: 'absolute', top: 60, left: 20, backgroundColor: 'rgba(255,255,255,0.9)', padding: 16, borderRadius: 16, gap: 12 },

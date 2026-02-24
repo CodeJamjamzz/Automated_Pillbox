@@ -13,7 +13,6 @@ export interface Partition {
   illness?: string;
 
   // --- ADD THESE TO FIX THE ERRORS ---
-  color_code: number;
   dosage: string;
   duration_days?: number;
   start_date?: string;

@@ -701,15 +701,22 @@ const PartitionConfig: React.FC<PartitionConfigProps> = ({ partition, onSave, on
     setLoading(true);
 
     try {
-      const rawInterval = 24 / Math.max(timesPerDay, 1);
-      const intervalHours = Math.floor(rawInterval);
-
+      // Calculate the interval (e.g., 24 / 3 times a day = 8 hour interval)
+      const intervalHours = Math.floor(24 / Math.max(timesPerDay, 1));
       const generatedTimes: string[] = [];
-      let currentScan = new Date(firstDoseTime);
+      
+      const startHour = firstDoseTime.getHours();
+      const startMinute = firstDoseTime.getMinutes();
 
       for (let i = 0; i < timesPerDay; i++) {
-        generatedTimes.push(currentScan.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
-        currentScan.setHours(currentScan.getHours() + intervalHours);
+        // Add interval, and use modulo (%) 24 to wrap around midnight (e.g., 26:00 becomes 02:00)
+        let calcHour = (startHour + (intervalHours * i)) % 24;
+        
+        // Ensure 2-digit military time formatting
+        let formattedHour = calcHour.toString().padStart(2, '0');
+        let formattedMinute = startMinute.toString().padStart(2, '0');
+        
+        generatedTimes.push(`${formattedHour}:${formattedMinute}`);
       }
 
       const formattedStartDate = startDate.toISOString().split('T')[0];
