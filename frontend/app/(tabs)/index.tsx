@@ -29,10 +29,10 @@ const INITIAL_PATIENT: PatientRecord = {
         illness: '',
         pillCount: 0,
         schedule: [],
-        selectedDays: [0, 1, 2, 3, 4, 5, 6], // Default Everyday
+        selectedDays: [0, 1, 2, 3, 4, 5, 6],
         isBlinking: false,
         adherenceRate: 0,
-        history: [],
+        history: []
     })),
     lastLocation: { lat: 10.3157, lng: 123.8854 },
     riskScore: 0
@@ -45,6 +45,9 @@ const App: React.FC = () => {
     const [patient, setPatient] = useState<PatientRecord>(INITIAL_PATIENT);
     const [activeAlarm, setActiveAlarm] = useState<Partition | null>(null);
     const lastCheckedMinute = useRef<string>("");
+    
+    // --- NEW: LOG COUNTER TRACKER ---
+    const localLogCounter = useRef<number>(-1);
 
     // --- 1. FIREBASE REAL-TIME LISTENER ---
     useEffect(() => {
@@ -52,12 +55,17 @@ const App: React.FC = () => {
 
         if (phase === AppPhase.HOME) {
             setLoadingScreen(true);
-            const slotsRef = ref(rtdb, 'pillbox_001/slots');
+            
+            // Listen to the ROOT of the device to get slots AND log_counter simultaneously
+            const deviceRef = ref(rtdb, 'pillbox_001');
 
-            unsubscribe = onValue(slotsRef, (snapshot) => {
+            unsubscribe = onValue(deviceRef, (snapshot) => {
                 if (snapshot.exists()) {
-                    const slotsData = snapshot.val();
+                    const data = snapshot.val();
+                    const slotsData = data.slots || {};
+                    const cloudLogCounter = data.log_counter || 0;
                     
+                    // 1. Sync Partitions
                     setPatient(prevPatient => {
                         const updatedPartitions = prevPatient.partitions.map(p => {
                             const dbSlot = slotsData[p.id.toString()];
@@ -73,13 +81,24 @@ const App: React.FC = () => {
                                     timesPerDay: dbSlot.timesPerDay || 1,
                                     start_date: dbSlot.start_date || p.start_date,
                                     start_time: dbSlot.start_time || p.start_time,
-                                    selectedDays: dbSlot.selectedDays || [0, 1, 2, 3, 4, 5, 6] // Fetch selected days
+                                    selectedDays: dbSlot.selectedDays || [0, 1, 2, 3, 4, 5, 6] 
                                 };
                             }
                             return p;
                         });
                         return { ...prevPatient, partitions: updatedPartitions };
                     });
+
+                    // 2. RECIPROCAL OVERRIDE: Check if Hardware resolved the alarm first!
+                    if (localLogCounter.current === -1) {
+                        localLogCounter.current = cloudLogCounter; // First boot sync
+                    } else if (cloudLogCounter > localLogCounter.current) {
+                        console.log("Device handled the alarm! Dismissing App Modal.");
+                        localLogCounter.current = cloudLogCounter;
+                        
+                        // Force dismiss the modal because the physical button was pressed!
+                        setActiveAlarm(null);
+                    }
                 }
                 setLoadingScreen(false);
             }, (error) => {
@@ -107,42 +126,27 @@ const App: React.FC = () => {
 
         const alarmInterval = setInterval(() => {
             const now = new Date();
-            
-            // Format current time to "HH:MM"
             const currentH = now.getHours().toString().padStart(2, '0');
             const currentM = now.getMinutes().toString().padStart(2, '0');
             const currentTime = `${currentH}:${currentM}`;
-            
-            // Format current date to "YYYY-MM-DD" for start_date comparison
             const currentYear = now.getFullYear();
             const currentMonth = (now.getMonth() + 1).toString().padStart(2, '0');
             const currentDayStr = now.getDate().toString().padStart(2, '0');
             const currentDateStr = `${currentYear}-${currentMonth}-${currentDayStr}`;
-            
-            // Get current day of week (0 = Sunday, 6 = Saturday)
             const currentDayOfWeek = now.getDay(); 
 
             if (currentTime !== lastCheckedMinute.current) {
                 patient.partitions.forEach(p => {
-                    // CONDITION 1: Has the start date arrived?
                     const hasStarted = !p.start_date || currentDateStr >= p.start_date;
-
-                    // CONDITION 2: Is today one of the selected schedule days?
                     const isTodaySelected = !p.selectedDays || p.selectedDays.includes(currentDayOfWeek);
-
-                    // CONDITION 3: Does current time match a scheduled dose time?
                     const isTimeMatch = p.schedule && p.schedule.includes(currentTime);
-
-                    // CONDITION 4: Are there pills in the box?
                     const hasPills = p.pillCount > 0;
 
-                    // If ALL four conditions are met, trigger the alarm!
                     if (hasStarted && isTodaySelected && isTimeMatch && hasPills) {
                         setActiveAlarm(p);
                     }
                 });
                 
-                // Mark this minute as checked so we don't spam the modal
                 lastCheckedMinute.current = currentTime;
             }
         }, 5000);
@@ -156,11 +160,28 @@ const App: React.FC = () => {
         if (!slotToUpdate) return;
 
         const newAmount = Math.max(0, slotToUpdate.pillCount - 1);
-        setActiveAlarm(null);
+        setActiveAlarm(null); // Close modal instantly for UI responsiveness
 
         try {
-             const slotRef = ref(rtdb, `pillbox_001/slots/${id}`);
-             await update(slotRef, { amount: newAmount });
+             // 1. Advance the local counter so we don't accidentally trigger our own dismiss logic
+             const newCounter = localLogCounter.current === -1 ? 1 : localLogCounter.current + 1;
+             localLogCounter.current = newCounter;
+             
+             const logName = `log_${String(newCounter).padStart(3, '0')}`;
+
+             // 2. Perform a multi-path atomic update to update amount AND tell ESP32 to shut up!
+             const updates: any = {};
+             updates[`pillbox_001/slots/${id}/amount`] = newAmount;
+             updates[`pillbox_001/log_counter`] = newCounter;
+             updates[`pillbox_001/logs/${logName}`] = {
+                 action: "TAKEN_VIA_APP",
+                 slot_id: id,
+                 timestamp: Math.floor(Date.now() / 1000)
+             };
+
+             const rootRef = ref(rtdb);
+             await update(rootRef, updates);
+
         } catch (e) {
             console.error("Failed to update Firebase", e);
         }
