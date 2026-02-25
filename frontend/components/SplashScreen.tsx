@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { View, Text, StyleSheet, Animated, Image } from 'react-native';
 import { ShieldCheck } from 'lucide-react-native';
