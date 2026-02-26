@@ -19,7 +19,7 @@ import PartitionConfig from './PartitionConfig';
 import { registerForNotifications } from '@/app/utils/NotificationService';
 
 // --- FIREBASE RTDB IMPORTS ---
-import { ref, update } from "firebase/database";
+import { ref, update, onValue, get } from "firebase/database";
 import { rtdb } from "@/app/utils/firebase";
 
 // --- INITIAL STATE & CONSTANTS ---
@@ -83,7 +83,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
       setPatient(props.patient);
     }
   }, [props.patient]);
-  
+
   // --- TIME STATE ---
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -111,7 +111,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
 
           if (liveDevice) {
             await liveDevice.discoverAllServicesAndCharacteristics();
-            setDevice(liveDevice); 
+            setDevice(liveDevice);
             console.log("Device rehydrated successfully:", liveDevice.id);
           } else {
             console.log("Device not found in connected list. Attempting reconnect...");
@@ -126,6 +126,71 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
     };
     fetchLiveDevice();
   }, [connectedDevice]);
+
+  // --- NEW: PING DEVICE FUNCTIONALITY (FIREBASE RTDB) ---
+    const [isPinging, setIsPinging] = useState(false);
+
+    const handlePingDevice = async () => {
+      try {
+        setIsPinging(true);
+
+        // Target the specific device node in Firebase
+        const pingRef = ref(rtdb, 'pillbox_001');
+
+        // Update the 'locate' node to 1 to trigger the ESP32
+        await update(pingRef, { locate: 1 });
+
+        // Auto-reset the UI button state after 15 seconds
+        // The ESP32 will also reset the Firebase value to 0 on its end
+        setTimeout(async () => {
+          setIsPinging(false);
+          // Optional: Failsafe to ensure it resets in the cloud if the ESP32 is offline
+          await update(pingRef, { locate: 0 });
+        }, 15000);
+      } catch (error) {
+        console.error("Failed to ping device via Firebase:", error);
+        setIsPinging(false);
+        alert("Failed to send ping command to MedBox.");
+      }
+    };
+
+   // --- REAL-TIME DEVICE SYNC (Listens to ESP32 physical button presses) ---
+     useEffect(() => {
+       const logsRef = ref(rtdb, 'pillbox_001/logs');
+
+       const unsubscribe = onValue(logsRef, (snapshot) => {
+         if (snapshot.exists()) {
+           const logsData = snapshot.val();
+
+           // Convert the logs object into an array and get logs from the last 24 hours
+           const twentyFourHoursAgo = (Date.now() / 1000) - (24 * 60 * 60);
+
+           const recentLogs = Object.values(logsData).filter((log: any) =>
+             log.timestamp > twentyFourHoursAgo &&
+             (log.action === "TAKEN" || log.action === "MANUAL_TAKE" || log.action === "TAKEN_VIA_APP")
+           );
+
+           setTakenDoses(prevDoses => {
+             const updatedDoses = new Set(prevDoses);
+
+             recentLogs.forEach((log: any) => {
+               patient.partitions.forEach(p => {
+                 if (p.id === log.slot_id && p.schedule) {
+                    p.schedule.forEach((timeStr, index) => {
+                       const doseId = `${p.id}-${index}`;
+                       updatedDoses.add(doseId);
+                    });
+                 }
+               });
+             });
+
+             return updatedDoses;
+           });
+         }
+       });
+
+       return () => unsubscribe();
+     }, [patient.partitions]);
 
   // --- SCHEDULE LOGIC ---
   const [takenDoses, setTakenDoses] = useState<Set<string>>(new Set());
@@ -150,26 +215,71 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   }, [patient.partitions, takenDoses]);
 
   // --- Handle Dose Action (Take/Undo) & Update Inventory ---
-  const handleDoseAction = (dose: any) => {
-    if (takenDoses.has(dose.id)) return;
+//   const handleDoseAction = (dose: any) => {
+//     if (takenDoses.has(dose.id)) return;
+//
+//     // 1. Update Visual Status
+//     setTakenDoses(prev => {
+//       const next = new Set(prev);
+//       next.add(dose.id);
+//       return next;
+//     });
+//
+//     // 2. Update Inventory (Pill Count)
+//     const updatedPartitions = patient.partitions.map(p => {
+//       if (p.id === dose.partitionId) {
+//         return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
+//       }
+//       return p;
+//     });
+//
+//     handlePatientUpdate({ ...patient, partitions: updatedPartitions });
+//   };
 
-    // 1. Update Visual Status
-    setTakenDoses(prev => {
-      const next = new Set(prev);
-      next.add(dose.id);
-      return next;
-    });
+    // --- Handle Dose Action (Take/Undo) & Update Inventory ---
+      const handleDoseAction = async (dose: any) => {
+        if (takenDoses.has(dose.id)) return;
 
-    // 2. Update Inventory (Pill Count)
-    const updatedPartitions = patient.partitions.map(p => {
-      if (p.id === dose.partitionId) {
-        return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
-      }
-      return p;
-    });
+        // 1. Update Visual Status locally instantly
+        setTakenDoses(prev => {
+          const next = new Set(prev);
+          next.add(dose.id);
+          return next;
+        });
 
-    handlePatientUpdate({ ...patient, partitions: updatedPartitions });
-  };
+        // 2. Update Inventory locally
+        const updatedPartitions = patient.partitions.map(p => {
+          if (p.id === dose.partitionId) {
+            return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
+          }
+          return p;
+        });
+        handlePatientUpdate({ ...patient, partitions: updatedPartitions });
+
+        // 3. TELL THE ESP32 WE TOOK IT VIA APP!
+        try {
+          const counterRef = ref(rtdb, 'pillbox_001/log_counter');
+          const counterSnap = await get(counterRef);
+          let newCounter = 1;
+          if (counterSnap.exists()) {
+            newCounter = counterSnap.val() + 1;
+          }
+
+          // Format log name e.g. log_169
+          const logName = `log_${String(newCounter).padStart(3, '0')}`;
+
+          const newLogRef = ref(rtdb, `pillbox_001/logs/${logName}`);
+          await update(newLogRef, {
+             action: "TAKEN_VIA_APP",
+             slot_id: dose.partitionId,
+             timestamp: Math.floor(Date.now() / 1000)
+          });
+
+          await update(counterRef, newCounter); // Update counter so ESP32 syncs it
+        } catch (error) {
+          console.error("Failed to log app action to Firebase:", error);
+        }
+      };
 
   const handlePatientUpdate = (updatedPatient: PatientRecord) => {
     setPatient(updatedPatient);
@@ -181,7 +291,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentTime(new Date());
-    }, 60000); 
+    }, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -253,6 +363,22 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
               isNewDevice={isNewDevice}
           />
 
+
+          {/* --- NEW: PING DEVICE BUTTON --- */}
+                    <View style={styles.pingContainer}>
+                      <TouchableOpacity
+                        // Removed the !device opacity check so it's fully opaque and clickable over Wi-Fi
+                        style={[styles.pingButton, isPinging && styles.pingButtonActive]}
+                        onPress={handlePingDevice}
+                        disabled={isPinging}
+                      >
+                        <Bluetooth size={20} stroke={isPinging ? "#ffffff" : "#2563eb"} />
+                        <Text style={[styles.pingButtonText, isPinging && styles.pingTextActive]}>
+                          {isPinging ? "PINGING MEDBOX..." : "FIND MY MEDBOX"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
           {/* MODAL: FULL SCREEN MAP */}
           <Modal visible={showFullMap} animationType="slide">
             <View style={styles.fullMapContainer}>
@@ -305,7 +431,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                     partition={configPartition}
                     onSave={async (data) => {
                       const updatedP = {...configPartition, ...data as Partition};
-                      
+
                       // 1. Optimistic UI Update
                       handlePatientUpdate({
                         ...patient,
@@ -321,7 +447,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                       // 3. Push EVERYTHING to Firebase RTDB (Removed await import crashes)
                       try {
                           const slotRef = ref(rtdb, `pillbox_001/slots/${updatedP.id}`);
-                          await update(slotRef, { 
+                          await update(slotRef, {
                               amount: updatedP.pillCount,
                               times: timesString,
                               medicineName: updatedP.medicineName || '',
@@ -330,12 +456,12 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
                               timesPerDay: updatedP.timesPerDay || 1,
                               start_date: updatedP.start_date || '',
                               start_time: updatedP.start_time || '',
-                              selectedDays: updatedP.selectedDays || [0,1,2,3,4,5,6] 
+                              selectedDays: updatedP.selectedDays || [0,1,2,3,4,5,6]
                           });
                       } catch (error) {
                           console.error("Failed to save to Firebase RTDB:", error);
                       }
-                      
+
                       setConfigPartition(null);
                     }}
                     onClose={() => setConfigPartition(null)}               />
@@ -363,7 +489,41 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   legendText: { fontSize: 14, fontWeight: 'bold', color: '#1e293b' },
   closeMapButton: { position: 'absolute', bottom: 40, alignSelf: 'center', backgroundColor: '#ef4444', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 30, flexDirection: 'row', alignItems: 'center', gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 6 },
-  closeMapText: { color: '#fff', fontWeight: '900', fontSize: 14 }
+  closeMapText: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  // --- NEW: PING STYLES ---
+    pingContainer: {
+      marginTop: 24,
+      alignItems: 'center'
+    },
+    pingButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#eff6ff',
+      paddingVertical: 16,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: '#2563eb',
+      gap: 10,
+      width: '100%',
+      shadowColor: '#2563eb',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    pingButtonActive: {
+      backgroundColor: '#2563eb'
+    },
+    pingButtonText: {
+      color: '#2563eb',
+      fontSize: 14,
+      fontWeight: '900',
+      letterSpacing: 0.5
+    },
+    pingTextActive: {
+      color: '#ffffff'
+    },
 });
 
 export default Dashboard;
