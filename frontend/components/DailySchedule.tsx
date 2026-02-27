@@ -71,12 +71,6 @@ const DailySchedule: React.FC<DailyScheduleProps> = ({ todayDoses, currentTime, 
 
                         const isTaken = dose.status === 'taken';
 
-                        // --- NEW FEATURE: HIDE TAKEN DOSES AFTER 5 HOURS ---
-                        // 300 minutes = exactly 5 hours. If it's taken AND 5 hours have passed, don't render it at all!
-                        if (isTaken && diffMins < -300) {
-                            return null;
-                        }
-
                         // 3. Determine the 4 Strict UI States
                         // State 1: Future (More than 5 minutes away)
                         const isFuture = diffMins > 5;

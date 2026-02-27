@@ -162,26 +162,36 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
          if (snapshot.exists()) {
            const logsData = snapshot.val();
 
-           // Convert the logs object into an array and get logs from the last 24 hours
-           const twentyFourHoursAgo = (Date.now() / 1000) - (24 * 60 * 60);
+           // 1. Calculate the timestamp for 12:00 AM (Midnight) of the current day
+           const now = new Date();
+           const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
 
+           // 2. Filter logs to only include actions from TODAY
            const recentLogs = Object.values(logsData).filter((log: any) =>
-             log.timestamp > twentyFourHoursAgo &&
+             log.timestamp >= startOfDay &&
              (log.action === "TAKEN" || log.action === "MANUAL_TAKE" || log.action === "TAKEN_VIA_APP")
            );
 
-           setTakenDoses(prevDoses => {
-             const updatedDoses = new Set(prevDoses);
+           // 3. Count how many valid doses were taken per slot today
+           const slotTakes: Record<number, number> = {};
+           recentLogs.forEach((log: any) => {
+             slotTakes[log.slot_id] = (slotTakes[log.slot_id] || 0) + 1;
+           });
 
-             recentLogs.forEach((log: any) => {
-               patient.partitions.forEach(p => {
-                 if (p.id === log.slot_id && p.schedule) {
-                    p.schedule.forEach((timeStr, index) => {
-                       const doseId = `${p.id}-${index}`;
-                       updatedDoses.add(doseId);
-                    });
-                 }
-               });
+           // 4. Match the count against the schedule
+           setTakenDoses(() => {
+             const updatedDoses = new Set<string>();
+
+             patient.partitions.forEach(p => {
+               const takesToday = slotTakes[p.id] || 0;
+               if (p.schedule) {
+                 p.schedule.forEach((timeStr, index) => {
+                   // E.g., If 2 doses were logged today, mark schedule indexes 0 and 1 as taken
+                   if (index < takesToday) {
+                     updatedDoses.add(`${p.id}-${index}`);
+                   }
+                 });
+               }
              });
 
              return updatedDoses;
@@ -215,7 +225,7 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   }, [patient.partitions, takenDoses]);
 
   // --- Handle Dose Action (Take/Undo) & Update Inventory ---
-  const handleDoseAction = (dose: any) => {
+  const handleDoseAction = async(dose: any) => {
     if (takenDoses.has(dose.id)) return;
 
     // 1. Update Visual Status
