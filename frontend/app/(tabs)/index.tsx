@@ -74,7 +74,7 @@ const App: React.FC = () => {
                                     ...p,
                                     pillCount: dbSlot.amount !== undefined ? dbSlot.amount : 0,
                                     schedule: dbSlot.times ? dbSlot.times.split(',').filter((t: string) => t.trim() !== '') : [],
-                                    label: dbSlot.medicineName || 'Unassigned',
+                                    label: dbSlot.illness || 'Unassigned',
                                     medicineName: dbSlot.medicineName || '',
                                     illness: dbSlot.illness || '',
                                     dosage: dbSlot.dosage || '',
@@ -120,7 +120,7 @@ const App: React.FC = () => {
         }
     }, [phase]);
 
-    // --- 3. BULLETPROOF ALARM CHECKER ---
+    // --- 3. PRECISE DATE/TIME ALARM CHECKER ---
     useEffect(() => {
         if (phase !== AppPhase.HOME) return;
 
@@ -129,15 +129,21 @@ const App: React.FC = () => {
             const currentH = now.getHours().toString().padStart(2, '0');
             const currentM = now.getMinutes().toString().padStart(2, '0');
             const currentTime = `${currentH}:${currentM}`;
-            const currentYear = now.getFullYear();
-            const currentMonth = (now.getMonth() + 1).toString().padStart(2, '0');
-            const currentDayStr = now.getDate().toString().padStart(2, '0');
-            const currentDateStr = `${currentYear}-${currentMonth}-${currentDayStr}`;
+            
             const currentDayOfWeek = now.getDay(); 
+            const nowMs = now.getTime(); // Get exact current milliseconds
 
             if (currentTime !== lastCheckedMinute.current) {
                 patient.partitions.forEach(p => {
-                    const hasStarted = !p.start_date || currentDateStr >= p.start_date;
+                    
+                    // --- NEW PRECISE CHECK: Ensure exact date & time has passed ---
+                    let hasStarted = true;
+                    if (p.start_date && p.start_time) {
+                        // Combines "2026-02-27" and "14:20" into a strict timestamp
+                        const startDateTime = new Date(`${p.start_date}T${p.start_time}:00`).getTime();
+                        hasStarted = nowMs >= startDateTime;
+                    }
+
                     const isTodaySelected = !p.selectedDays || p.selectedDays.includes(currentDayOfWeek);
                     const isTimeMatch = p.schedule && p.schedule.includes(currentTime);
                     const hasPills = p.pillCount > 0;
@@ -176,7 +182,8 @@ const App: React.FC = () => {
              updates[`pillbox_001/logs/${logName}`] = {
                  action: "TAKEN_VIA_APP",
                  slot_id: id,
-                 timestamp: Math.floor(Date.now() / 1000)
+                 timestamp: Math.floor(Date.now() / 1000),
+                 scheduled_time: lastCheckedMinute.current // Explicit mapping sent to DB!
              };
 
              const rootRef = ref(rtdb);
