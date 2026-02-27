@@ -215,71 +215,51 @@ const Dashboard: React.FC<PatientDashboardProps> = (props) => {
   }, [patient.partitions, takenDoses]);
 
   // --- Handle Dose Action (Take/Undo) & Update Inventory ---
-//   const handleDoseAction = (dose: any) => {
-//     if (takenDoses.has(dose.id)) return;
-//
-//     // 1. Update Visual Status
-//     setTakenDoses(prev => {
-//       const next = new Set(prev);
-//       next.add(dose.id);
-//       return next;
-//     });
-//
-//     // 2. Update Inventory (Pill Count)
-//     const updatedPartitions = patient.partitions.map(p => {
-//       if (p.id === dose.partitionId) {
-//         return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
-//       }
-//       return p;
-//     });
-//
-//     handlePatientUpdate({ ...patient, partitions: updatedPartitions });
-//   };
+  const handleDoseAction = (dose: any) => {
+    if (takenDoses.has(dose.id)) return;
 
-    // --- Handle Dose Action (Take/Undo) & Update Inventory ---
-      const handleDoseAction = async (dose: any) => {
-        if (takenDoses.has(dose.id)) return;
+    // 1. Update Visual Status
+    setTakenDoses(prev => {
+      const next = new Set(prev);
+      next.add(dose.id);
+      return next;
+    });
 
-        // 1. Update Visual Status locally instantly
-        setTakenDoses(prev => {
-          const next = new Set(prev);
-          next.add(dose.id);
-          return next;
-        });
+    // 2. Update Inventory (Pill Count)
+    const updatedPartitions = patient.partitions.map(p => {
+      if (p.id === dose.partitionId) {
+        return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
+      }
+      return p;
+    });
 
-        // 2. Update Inventory locally
-        const updatedPartitions = patient.partitions.map(p => {
-          if (p.id === dose.partitionId) {
-            return { ...p, pillCount: Math.max(0, p.pillCount - 1) };
-          }
-          return p;
-        });
-        handlePatientUpdate({ ...patient, partitions: updatedPartitions });
+    handlePatientUpdate({ ...patient, partitions: updatedPartitions });
 
-        // 3. TELL THE ESP32 WE TOOK IT VIA APP!
-        try {
-          const counterRef = ref(rtdb, 'pillbox_001/log_counter');
-          const counterSnap = await get(counterRef);
-          let newCounter = 1;
-          if (counterSnap.exists()) {
-            newCounter = counterSnap.val() + 1;
-          }
+    // 3. TELL THE ESP32 WE TOOK IT VIA APP!
+            try {
+              const counterRef = ref(rtdb, 'pillbox_001/log_counter');
+              const counterSnap = await get(counterRef);
+              let newCounter = 1;
+              if (counterSnap.exists()) {
+                newCounter = counterSnap.val() + 1;
+              }
 
-          // Format log name e.g. log_169
-          const logName = `log_${String(newCounter).padStart(3, '0')}`;
+              // Format log name e.g. log_169
+              const logName = `log_${String(newCounter).padStart(3, '0')}`;
 
-          const newLogRef = ref(rtdb, `pillbox_001/logs/${logName}`);
-          await update(newLogRef, {
-             action: "TAKEN_VIA_APP",
-             slot_id: dose.partitionId,
-             timestamp: Math.floor(Date.now() / 1000)
-          });
+              const newLogRef = ref(rtdb, `pillbox_001/logs/${logName}`);
+              await update(newLogRef, {
+                 action: "TAKEN_VIA_APP",
+                 slot_id: dose.partitionId,
+                 timestamp: Math.floor(Date.now() / 1000)
+              });
 
-          await update(counterRef, newCounter); // Update counter so ESP32 syncs it
-        } catch (error) {
-          console.error("Failed to log app action to Firebase:", error);
-        }
-      };
+              await update(counterRef, newCounter); // Update counter so ESP32 syncs it
+            } catch (error) {
+              console.error("Failed to log app action to Firebase:", error);
+            }
+  };
+
 
   const handlePatientUpdate = (updatedPatient: PatientRecord) => {
     setPatient(updatedPatient);
