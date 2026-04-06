@@ -65,6 +65,13 @@ MedSync aims to:
 
 ---
 
+## 🎥 Video Demo
+
+Watch the full demonstration of the mobile app and hardware synchronization here:  
+**[Watch the MedSync Video Demo ↗](https://youtu.be/LUiU35CcOsE?si=lAz5yEfB9SUSTeVE)**
+
+---
+
 ## 📌 Status
 
 🟡 Prototype  
